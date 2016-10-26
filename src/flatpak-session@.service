@@ -1,0 +1,15 @@
+[Unit]
+Descritpion=Test Automatic login for user %i
+After=systemd-user-sessions.service
+
+[Service]
+User=%i
+WorkingDirectory=~
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+PAMName=login
+ExecStart=/usr/libexec/test-login/login.sh
+
+[Install]
+WantedBy=multi-user.target
