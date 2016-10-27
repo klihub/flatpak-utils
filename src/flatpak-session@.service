@@ -1,6 +1,6 @@
 [Unit]
-Descritpion=Test Automatic login for user %i
-After=systemd-user-sessions.service
+Description=Automatic flatpak login session for user/remote %i.
+After=systemd-user-sessions.service network.service
 
 [Service]
 User=%i
@@ -9,7 +9,7 @@ StandardInput=null
 StandardOutput=journal
 StandardError=journal
 PAMName=login
-ExecStart=/usr/libexec/test-login/login.sh
+ExecStart=/usr/bin/flatpak-session -vvv start
 
 [Install]
 WantedBy=multi-user.target

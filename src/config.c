@@ -35,7 +35,7 @@
 #define _GNU_SOURCE
 #include <getopt.h>
 
-#include "generator.h"
+#include "flatpak-session.h"
 
 static void print_usage(const char *argv0, int exit_code, const char *fmt, ...)
 {
@@ -48,23 +48,24 @@ static void print_usage(const char *argv0, int exit_code, const char *fmt, ...)
         va_end(ap);
     }
 
-    fprintf(stderr, "usage: %s [options] normal early late\n"
+    fprintf(stderr, "usage: %s [options] {enable|update [options] [remotes]}\n"
             "\n"
-            "Search for flatpak-providers and generate a systemd service\n"
-            "for each provider found. The per-provider systemd session will\n"
-            "create sessions for all found providers and start all flatpak\n"
-            "applications from that provider within the session.\n"
+            "The command enable will enable all or just the specified\n"
+            "flatpak sessions. The command update the applications for all\n"
+            "or just the selected remote.\n"
             "\n"
-            "Every provider is expected to have a single flatpak repository\n"
-            "registered for it. Every flatpak repository must have a similarly\n"
-            "named user associated with it. Every flatpak from a repository\n"
-            "will be started within the session for the repository user.\n"
-            "\n"
-            "The possible opions are:\n"
-            "  -t  --template <name>     template to generate services from\n"
+            "The possible common options are:\n"
+            "  -u, --allow-unsigned      allow unverifiable (unsigned) remotes\n"
             "  -n, --dry-run             just print, don't generate anything\n"
             "  -v, --verbose             increase logging verbosity\n"
-            "  -h, --help                print this help message\n", argv0);
+            "  -h, --help                print this help message\n"
+            "\n"
+            "The possible options for update are:\n"
+            "  -f, --fetch               just fetch, don't update\n"
+            "  -l, --local               update locally from fetched changes\n"
+            "  -m, --monitor             daemonize and poll/fetch updates\n"
+            "  -i, --poll-interval ival  use the given interval for polling\n",
+            argv0);
 
     if (exit_code < 0)
         return;
@@ -73,41 +74,80 @@ static void print_usage(const char *argv0, int exit_code, const char *fmt, ...)
 }
 
 
-static void set_defaults(generator_t *g, char **argv)
+static inline int is_systemd_generator(const char *argv0)
 {
-    g->argv0         = argv[0];
-    g->f             = NULL;
-    g->dry_run       = 0;
-    g->dir_normal    = NULL;
-    g->dir_early     = NULL;
-    g->dir_late      = NULL;
-    g->path_template = PATH_TEMPLATE;
+    const char *p;
+
+    if ((p = strrchr(argv0, '/')) == NULL)
+        p = argv0;
+    else
+        p++;
+
+    return !strcmp(p, SYSTEMD_GENERATOR);
 }
 
 
-void config_parse_cmdline(generator_t *g, int argc, char **argv)
+static void set_defaults(flatpak_t *f, char **argv)
 {
-#   define OPTIONS "t:nvh"
+    f->argv0      = argv[0];
+    f->gpg_verify = 1;
+
+    if (is_systemd_generator(argv[0]))
+        f->command = COMMAND_GENERATE;
+    else
+        f->command = COMMAND_START;
+}
+
+
+static void parse_interval(flatpak_t *f, const char *str)
+{
+    char   *end;
+    double  d;
+
+    d = strtod(str, &end);
+
+    if (end != NULL && *end != '\0') {
+        if (!strcmp(end, "s") || !strcmp(end, "sec"))
+            f->poll_interval = d < 30 ? 30 : (int)d;
+        if (!strcmp(end, "m") || !strcmp(end, "min"))
+            f->poll_interval = (int)(d * 60);
+        if (!strcmp(end, "h") || !strcmp(end, "hour") || !strcmp(end, "hours"))
+            f->poll_interval = (int)(d * 60 * 60);
+        if (!strcmp(end, "d") || !strcmp(end, "day") || !strcmp(end, "days"))
+            f->poll_interval = (int)(d * 24 * 60 * 60);
+        else
+            print_usage(f->argv0, EINVAL, "invalid poll interval '%s'", str);
+    }
+
+    if (f->poll_interval < FLATPAK_POLL_MIN_INTERVAL)
+        f->poll_interval = FLATPAK_POLL_MIN_INTERVAL;
+}
+
+
+static void parse_common_options(flatpak_t *f, int argc, char **argv)
+{
+#   define OPTIONS "-uvndh"
     static struct option options[] = {
-        { "template"    , required_argument, NULL, 't' },
-        { "dry-run"     , no_argument      , NULL, 'n' },
-        { "verbose"     , no_argument      , NULL, 'v' },
-        { "help"        , no_argument      , NULL, 'h' },
+        { "allow-unsigned", no_argument, NULL, 'u' },
+        { "verbose"       , no_argument, NULL, 'v' },
+        { "dry-run"       , no_argument, NULL, 'n' },
+        { "debug"         , no_argument, NULL, 'd' },
+        { "help"          , no_argument, NULL, 'h' },
         { NULL, 0, NULL, 0 }
     };
 
-    int opt;
+    const char *command = NULL;
+    int         opt;
 
-    set_defaults(g, argv);
-
-    while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
+    while (command == NULL &&
+           (opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
         switch (opt) {
-        case 't':
-            g->path_template = optarg;
+        case 'u':
+            f->gpg_verify = 0;
             break;
 
         case 'n':
-            g->dry_run = 1;
+            f->dry_run = 1;
             break;
 
         case 'v':
@@ -117,27 +157,162 @@ void config_parse_cmdline(generator_t *g, int argc, char **argv)
 
         case 'h':
             print_usage(argv[0], 0, "");
+
+        case 1:
+            optind--;
+            command = optarg;
             break;
 
         case '?':
-            print_usage(argv[0], EINVAL, "", opt);
-            break;
-
-        default:
-            print_usage(argv[0], EINVAL, "invalid argument '%c'", opt);
+            print_usage(argv[0], EINVAL, "invalid option");
             break;
         }
     }
+#undef OPTIONS
+}
 
-    log_open(g);
 
-    if (argc != optind + 3)
-        print_usage(argv[0], EINVAL, "Missing directory arguments.");
+static void parse_command(flatpak_t *f, int argc, char **argv)
+{
+    const char *command;
 
-    g->dir_normal  = argv[optind];
-    g->dir_early   = argv[optind + 1];
-    g->dir_late    = argv[optind + 2];
+    if (optind >= argc)
+        return;
 
-    g->dir_service = g->dir_normal;
+    if (*argv[optind] == '-' || *argv[optind] == '/')
+        return;
+
+    command = argv[optind];
+
+    if (!strcmp(command, "enable") || !strcmp(command, "generate"))
+        f->command = COMMAND_GENERATE;
+    else if (!strcmp(command, "start"))
+        f->command = COMMAND_START;
+    else if (!strcmp(optarg, "fetch"))
+        f->command = COMMAND_FETCH;
+    else if (!strcmp(optarg, "update"))
+        f->command = COMMAND_UPDATE;
+    else
+        print_usage(argv[0], EINVAL, "invalid command '%s'", optarg);
+
+    optind++;
+}
+
+
+static void parse_enable_options(flatpak_t *f, int argc, char **argv)
+{
+    if (optind + 2 > argc - 1)
+        print_usage(argv[0], EINVAL,
+                    "missing systemd generator directory arguments");
+
+    if (argv[optind  ][0] == '-' ||
+        argv[optind+1][0] == '-' ||
+        argv[optind+2][0] == '-') {
+        print_usage(argv[0], EINVAL,
+                    "can't mix options with systemd generator directories");
+    }
+
+    f->dir_service = argv[optind];
+    optind += 3;
+
+    if (optind <= argc - 1) {
+        f->chosen  = argv + optind;
+        f->nchosen = argc - optind;
+    }
+}
+
+
+static void parse_update_options(flatpak_t *f, int argc, char **argv)
+{
+#   define OPTIONS "-flm:i"
+    static struct option options[] = {
+        { "fetch"        , no_argument      , NULL, 'f' },
+        { "local"        , no_argument      , NULL, 'l' },
+        { "monitor"      , no_argument      , NULL, 'm' },
+        { "poll-interval", required_argument, NULL, 'i' },
+    };
+
+    int opt;
+
+    if (optind >= argc)
+        return;
+
+    while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
+        if (f->chosen != NULL && opt != 1) {
+            print_usage(argv[0], EINVAL,
+                        "can't mix options with remote selectors");
+        }
+
+        switch (opt) {
+        case 'f':
+            if (f->command == COMMAND_UPDATE)
+                f->command = COMMAND_FETCH;
+            else
+                print_usage(argv[0], EINVAL, "conflicting 'fetch' option");
+            break;
+
+        case 'l':
+            if (f->command == COMMAND_UPDATE)
+                f->command = COMMAND_APPLY;
+            else
+                print_usage(argv[0], EINVAL, "conflicting 'local' option");
+            break;
+
+        case 'm':
+            if (f->poll_interval <= 0)
+                f->poll_interval = FLATPAK_POLL_MIN_INTERVAL;
+            break;
+
+        case 'i':
+            parse_interval(f, optarg);
+            break;
+
+        case 1:
+            if (f->chosen == NULL) {
+                f->chosen  = argv + optind - 1;
+                f->nchosen = argc - optind + 1;
+            }
+            break;
+
+        case '?':
+            print_usage(argv[0], EINVAL, "invalid update option");
+            break;
+        }
+    }
+}
+
+
+void config_parse_cmdline(flatpak_t *f, int argc, char **argv)
+{
+    memset(f, 0, sizeof(*f));
+    f->sfd = -1;
+
+    set_defaults(f, argv);
+
+    parse_common_options(f, argc, argv);
+    parse_command(f, argc, argv);
+
+    switch (f->command) {
+    case COMMAND_GENERATE:
+        parse_enable_options(f, argc, argv);
+        break;
+    case COMMAND_UPDATE:
+        parse_update_options(f, argc, argv);
+        break;
+    default:
+        break;
+    }
+
+    if (f->chosen != NULL) {
+        int i;
+
+        for (i = 0; i < f->nchosen; i++) {
+            if (f->chosen[i][0] == '-')
+                print_usage(argv[0], EINVAL,
+                            "can't mix options with remote selectors");
+        }
+    }
+
+    log_open(f);
 }
 

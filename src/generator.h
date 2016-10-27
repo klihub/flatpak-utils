@@ -49,8 +49,16 @@
 #    define LIBEXECDIR "/usr/libexec"
 #endif
 
-#ifndef SYSTEM_SERVICEDIR
-#    define SYSTEM_SERVICEDIR "/usr/lib/systemd/system"
+#ifndef SYSTEMD_SERVICEDIR
+#    define SYSTEMD_SERVICEDIR "/usr/lib/systemd/system"
+#endif
+
+#ifndef FLATPAK_SESSION
+#    define FLATPAK_SESSION "flatpak-session@.service"
+#endif
+
+#ifndef FLATPAK_TARGET
+#    define FLATPAK_TARGET "flatpak-sessions.target"
 #endif
 
 #define PATH_TEMPLATE LIBEXECDIR"/flatpak-utils/flatpak-session.template"
@@ -60,14 +68,14 @@
 typedef struct {
     FlatpakInstallation *f;
     GPtrArray           *remotes;
-    char                *template;
+    GPtrArray           *apps;
     const char          *argv0;
-    int                  dry_run : 1;
     const char          *dir_normal;
     const char          *dir_early;
     const char          *dir_late;
     const char          *dir_service;
-    const char          *path_template;
+    int                  dry_run : 1;
+    int                  gpg_verify : 1;
 } generator_t;
 
 
@@ -81,14 +89,16 @@ int fs_mkdirp(mode_t mode, const char *fmt, ...);
 int fs_symlink(const char *path, const char *dst);
 char *fs_service_path(generator_t *g, const char *usr, char *path, size_t size);
 char *fs_service_link(generator_t *g, const char *usr, char *path, size_t size);
-int fs_prepare_directories(generator_t *g);
+int fs_prepare_sessions(generator_t *g);
 
 /* flatpak.c */
 int fp_discover_remotes(generator_t *g);
-uid_t fp_resolve_user(FlatpakRemote *r, char *usrbuf, size_t size);
+uid_t fp_resolve_user(const char *remote, char *usrbuf, size_t size);
+int fp_discover_apps(generator_t *g);
 
 /* service.c */
 int service_generate_sessions(generator_t *g);
+int service_activate_sessions(generator_t *g);
 
 /* template.c */
 int template_load(generator_t *g);

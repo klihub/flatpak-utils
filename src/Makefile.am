@@ -6,51 +6,45 @@ PATHDEFS    = -DSYSCONFDIR=\"${sysconfdir}\" \
               -DLIBDIR=\"${libdir}\" \
               -DLIBEXECDIR=\"${libexecdir}\"
 
+systemd_DATA = flatpak-session@.service flatpak-sessions.target
+systemddir   = ${libdir}/systemd/system
+
+generator_PROGRAMS = flatpak-session-enable
+generatordir       = ${libdir}/systemd/system-generators
+
+session_SCRIPTS = start-session.sh
+sessiondir      = ${libexecdir}/flatpak-utils
+
+bin_PROGRAMS    =
+
 #############################################
 # flatpak-service-generator
 #
 
-systemd_generator_PROGRAMS = flatpak-service-generator
-systemd_generatordir = /lib/systemd/system-generators
+bin_PROGRAMS += flatpak-session
 
-flatpak_service_generator_SOURCES =		\
-		flatpak-service-generator.c	\
-		config.c			\
-		flatpak.c			\
-		service.c			\
-		filesystem.c			\
-		template.c			\
+flatpak_session_SOURCES =		\
+		flatpak-session.c 	\
+		config.c 		\
+		mainloop.c		\
+		remote.c		\
+		application.c		\
+		session.c		\
+		flatpak.c		\
+		filesystem.c		\
 		log.c
 
-flatpak_service_generator_CFLAGS =		\
-		$(AM_CFLAGS)			\
-		$(PATHDEFS)			\
+flatpak_session_CFLAGS =		\
+		$(AM_CFLAGS)		\
+		$(PATHDEFS)		\
 		$(FLATPAK_CFLAGS)
 
-flatpak_service_generator_LDADD =		\
-		$(FLATPAK_LIBS)			\
+flatpak_session_LDADD =			\
+		$(FLATPAK_LIBS)		\
 		-lm
 
-SERVICE_TEMPLATES =       			\
-		flatpak-service.template
-
-SYSTEMD_UNITS = 	      		\
-		flatpaks.target
-
-# Install service file template(s).
-install-service-templates:
-	install -d $(DESTDIR)${libexecdir}/flatpak-utils && \
-	    cp $(top_srcdir)/$(SERVICE_TERMPLATES) \
-	       $(DESTDIR)/${libexecdir}/flatpak-utils
-
-# Install units for systemd.
-install-systemd-units:
-	mkdir -p $(DESTDIR)/lib/systemd/system
-	    cp $(top_srcdir)/src/$(SYSTEMD_UNITS) \
-	        $(DESTDIR)/lib/systemd/system
-
-# Install various runtime data we need.
-install-data-hook: install-service-templates install-systemd-units
+flatpak-session-enable: flatpak-session
+	rm -f $@ && ln $< $@
 
 # cleanup
 clean-local:

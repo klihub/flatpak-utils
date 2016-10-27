@@ -27,24 +27,71 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <fcntl.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-
 #include "flatpak-session.h"
 
-int log_fd   = -1;
-int log_mask = 0xff;
 
-
-void log_open(flatpak_t *f)
+static int session_link(flatpak_t *f, remote_t *r)
 {
-    if (f->dry_run || (f->command != COMMAND_GENERATE))
-        log_fd = open("/proc/self/fd/1", O_WRONLY);
-    else
-        log_fd = open("/dev/kmsg", O_WRONLY);
+    const char *usr = remote_username(r, NULL, 0);
+    char        srv[PATH_MAX], lnk[PATH_MAX];
 
-    if (log_fd < 0)
-        log_fd = 1;
+    if (!fsys_service_path(f, usr, srv, sizeof(srv)) ||
+        !fsys_service_link(f, usr, lnk, sizeof(lnk)))
+        return -1;
+
+    log_info("linking session template %s to %s...", srv, lnk);
+
+    if (!f->dry_run) {
+        unlink(lnk);
+
+        if (symlink(srv, lnk) < 0)
+            return -1;
+    }
+
+    return 0;
 }
 
+
+int session_enable(flatpak_t *f)
+{
+    GHashTableIter  it;
+    remote_t       *r;
+    int             status;
+
+    if (fsys_prepare_sessions(f) < 0)
+        return -1;
+
+    status = 0;
+
+    g_hash_table_iter_init(&it, f->remotes);
+    while (g_hash_table_iter_next(&it, NULL, (void **)&r)) {
+        if (session_link(f, r) < 0)
+            status = -1;
+    }
+
+    return status;
+}
+
+
+int session_start(flatpak_t *f)
+{
+    remote_t       *r = remote_for_user(f, geteuid());
+    application_t  *app;
+    GHashTableIter  it;
+
+    g_hash_table_iter_init(&it, f->apps);
+    while (g_hash_table_iter_next(&it, NULL, (void **)&app)) {
+        if (remote_lookup(f, app->origin) == r)
+            ftpk_launch_app(f, app);
+    }
+
+    return 0;
+}
+
+
+int session_stop(flatpak_t *f)
+{
+    UNUSED_ARG(f);
+
+    return 0;
+}

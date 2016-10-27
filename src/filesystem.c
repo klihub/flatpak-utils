@@ -29,6 +29,7 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <string.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <fcntl.h>
@@ -37,14 +38,28 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
-#include "generator.h"
+#include "flatpak-session.h"
 
 
-char *fs_mkpath(char *path, size_t size, const char *fmt, ...)
+int fsys_prepare_sessions(flatpak_t *f)
+{
+    char *dir = fsys_mkpath(NULL, 0, "%s/%s.wants",
+                            f->dir_service, FLATPAK_TARGET);
+
+    log_info("creating service directory %s...", dir);
+
+    if (f->dry_run)
+        return 0;
+    else
+        return fsys_mkdirp(0755, dir);
+}
+
+
+char *fsys_mkpath(char *path, size_t size, const char *fmt, ...)
 {
     static char buf[PATH_MAX];
-    va_list ap;
-    int n;
+    va_list     ap;
+    int         n;
 
     if (path == NULL) {
         path = buf;
@@ -68,7 +83,7 @@ char *fs_mkpath(char *path, size_t size, const char *fmt, ...)
 }
 
 
-int fs_mkdir(const char *path, mode_t mode)
+int fsys_mkdir(const char *path, mode_t mode)
 {
     const char *p;
     char       *q, buf[PATH_MAX];
@@ -81,28 +96,6 @@ int fs_mkdir(const char *path, mode_t mode)
     }
 
     log_debug("checking/creating '%s'...", path);
-
-    /*
-     * Notes:
-     *     Our directory creation algorithm logic closely resembles what
-     *     'mkdir -p' does. We simply walk the given path component by
-     *     component, testing if each one exist. If an existing one is
-     *     not a directory we bail out. Missing ones we try to create with
-     *     the given mode, bailing out if we fail.
-     *
-     *     Unlike 'mkdir -p' whenever we fail we clean up by removing
-     *     all directories we have created (or at least we try).
-     *
-     *     Similarly to 'mkdir -p' we don't try to be overly 'smart' about
-     *     the path we're handling. Especially we never try to treat '..'
-     *     in any special way. This is very much intentional and the idea
-     *     is to let the caller try to create a full directory hierarchy
-     *     atomically, either succeeeding creating the full hierarchy, or
-     *     none of it. To see the consequences of these design choices,
-     *     consider what are the possible outcomes of a call like
-     *
-     *       fs_mkdir("/home/kli/bin/../sbin/../scripts/../etc/../doc", 0755);
-     */
 
     p = path;
     q = buf;
@@ -162,7 +155,7 @@ int fs_mkdir(const char *path, mode_t mode)
 }
 
 
-int fs_mkdirp(mode_t mode, const char *fmt, ...)
+int fsys_mkdirp(mode_t mode, const char *fmt, ...)
 {
     va_list ap;
     char path[PATH_MAX];
@@ -175,7 +168,7 @@ int fs_mkdirp(mode_t mode, const char *fmt, ...)
     if (n < 0 || n >= (int)sizeof(path))
         goto nametoolong;
 
-    return fs_mkdir(path, mode);
+    return fsys_mkdir(path, mode);
 
  nametoolong:
     errno = ENAMETOOLONG;
@@ -183,7 +176,7 @@ int fs_mkdirp(mode_t mode, const char *fmt, ...)
 }
 
 
-int fs_symlink(const char *path, const char *dst)
+int fsys_symlink(const char *path, const char *dst)
 {
     struct stat stp, std;
 
@@ -209,22 +202,69 @@ int fs_symlink(const char *path, const char *dst)
 }
 
 
-char *fs_service_path(generator_t *g, const char *usr, char *path, size_t size)
+char *fsys_service_path(flatpak_t *f, const char *usr, char *path, size_t size)
 {
-    return fs_mkpath(path, size, "%s/flatpak-%s-session.service",
-                     g->dir_service, usr);
+    UNUSED_ARG(f);
+    UNUSED_ARG(usr);
+
+    return fsys_mkpath(path, size, "%s/%s", SYSTEMD_SERVICEDIR, FLATPAK_SESSION);
 }
 
 
-char *fs_service_link(generator_t *g, const char *usr, char *path, size_t size)
+char *fsys_service_link(flatpak_t *f, const char *usr, char *path, size_t size)
 {
-    return fs_mkpath(path, size, "%s/flatpak.target.wants/%s-session.service",
-                     g->dir_service, usr);
-}
+    const char *session = FLATPAK_SESSION, *s;
+    char       *d;
+    int         l, n;
 
+    d = path;
+    l = (int)size;
 
-int fs_prepare_directories(generator_t *g)
-{
-    return fs_mkdirp(0755, fs_mkpath(NULL, 0, "%s/flatpak.target.wants",
-                                     g->dir_service));
+    n = snprintf(d, l, "%s/%s.wants/", f->dir_service, FLATPAK_TARGET);
+
+    if (n < 0)
+        return NULL;
+    if (n >= l)
+        goto overflow;
+
+    d += n;
+    l -= n;
+
+    s = strchr(session, '@');
+
+    if (s != NULL) {
+        n = snprintf(d, l, "%.*s", (int)(s - session + 1), session);
+
+        if (n < 0)
+            return NULL;
+        if (n >= l)
+            goto overflow;
+
+        d += n;
+        l -= n;
+        s++;
+
+        n = snprintf(d, l, "%s", usr);
+
+        if (n < 0)
+            return NULL;
+        if (n >= l)
+            goto overflow;
+
+        d += n;
+        l -= n;
+    }
+
+    n = snprintf(d, l, "%s", s);
+
+    if (n < 0)
+        return NULL;
+    if (n >= l)
+        goto overflow;
+
+    return path;
+
+ overflow:
+    errno = EOVERFLOW;
+    return NULL;
 }

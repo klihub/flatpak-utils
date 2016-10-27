@@ -42,17 +42,21 @@ static int service_generate(generator_t *g, FlatpakRemote *r, const char *usr)
         !fs_service_link(g, usr, lnk, sizeof(lnk)))
         goto fail;
 
+#if 0
     if (template_eval(g, usr, remote, srv) < 0)
         goto template_fail;
+#endif
 
     if (symlink(srv, lnk) < 0)
         goto fail;
 
     return 0;
 
+#if 0
  template_fail:
     log_error("service template evaluation failed for usr %s (remote %s)",
               usr, remote);
+#endif
 
  fail:
     return -1;
@@ -64,23 +68,70 @@ int service_generate_sessions(generator_t *g)
     FlatpakRemote *r;
     unsigned int   i;
     char           usr[256];
+    const char    *name;
 
     for (i = 0; i < g->remotes->len; i++) {
-        r = g_ptr_array_index(g->remotes, i);
+        r    = g_ptr_array_index(g->remotes, i);
+        name = flatpak_remote_get_name(r);
 
-        log_warning("process remote %s...", flatpak_remote_get_name(r));
-
-        if (fp_resolve_user(r, usr, sizeof(usr)) == (uid_t)-1) {
-            log_warning("remote %s has no associated user, ignoring...",
-                        flatpak_remote_get_name(r));
+        if (fp_resolve_user(name, usr, sizeof(usr)) == (uid_t)-1) {
+            log_warning("remote %s has no associated user, ignoring...", name);
             continue;
         }
 
         if (service_generate(g, r, usr) < 0)
-            log_error("failed to generate session for remote '%s'",
-                      flatpak_remote_get_name(r));
+            log_error("failed to generate session for remote '%s'", name);
     }
 
     return 0;
 }
 
+
+static int session_activate(generator_t *g, FlatpakRemote *r, const char *usr)
+{
+    char srv[PATH_MAX], lnk[PATH_MAX];
+
+    UNUSED_ARG(r);
+
+    if (!fs_service_path(g, usr, srv, sizeof(srv)) ||
+        !fs_service_link(g, usr, lnk, sizeof(lnk)))
+        return -1;
+
+    log_info("linking %s to %s...", srv, lnk);
+
+    if (!g->dry_run) {
+        unlink(lnk);
+
+        if (symlink(srv, lnk) < 0)
+            return -1;
+    }
+
+    return 0;
+}
+
+
+int service_activate_sessions(generator_t *g)
+{
+    FlatpakRemote *r;
+    unsigned int   i;
+    char           usr[256];
+    const char    *name;
+
+    if (fs_prepare_sessions(g) < 0)
+        return -1;
+
+    for (i = 0; i < g->remotes->len; i++) {
+        r    = g_ptr_array_index(g->remotes, i);
+        name = flatpak_remote_get_name(r);
+
+        if (fp_resolve_user(name, usr, sizeof(usr)) == (uid_t)-1) {
+            log_warning("remote %s has no associated user, ignoring...", name);
+            continue;
+        }
+
+        if (session_activate(g, r, usr) < 0)
+            log_error("failed to activate session for remote '%s'", name);
+    }
+
+    return 0;
+}

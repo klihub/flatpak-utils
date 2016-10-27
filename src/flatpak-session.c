@@ -1,0 +1,208 @@
+/*
+ * Copyright (c) 2016, Intel Corporation
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are
+ * met:
+ *
+ *   * Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ *   * Redistributions in binary form must reproduce the above copyright
+ *     notice, this list of conditions and the following disclaimer in the
+ *     documentation and/or other materials provided with the distribution.
+ *   * Neither the name of Intel Corporation nor the names of its contributors
+ *     may be used to endorse or promote products derived from this software
+ *     without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+ * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+ * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+ * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+
+#include "flatpak-session.h"
+
+static void setup_monitor(flatpak_t *f);
+static void setup_signals(flatpak_t *f);
+
+static int generate_sessions(flatpak_t *f)
+{
+    log_info("generating flatpak sessions...");
+
+    if (remote_discover(f) < 0)
+        return -1;
+
+    if (session_enable(f) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static int start_session(flatpak_t *f)
+{
+    log_info("starting flatpak session for user %d", geteuid());
+
+    if (app_discover(f) < 0)
+        return -1;
+
+    if (session_start(f) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static int stop_session(flatpak_t *f)
+{
+    log_info("stopping flatpak session for user %d", f->user);
+
+    return 0;
+}
+
+
+static int fetch_updates(flatpak_t *f)
+{
+    log_info("fetching updates...");
+
+    if (app_discover(f) < 0)
+        return -1;
+
+    if (app_fetch(f) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static int update_cached(flatpak_t *f)
+{
+    log_info("applying cached updates...");
+
+    if (app_discover(f) < 0)
+        return -1;
+
+    if (app_update(f) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static int fetch_and_update(flatpak_t *f)
+{
+    log_info("fetching updates and updating applications...");
+
+    if (app_discover(f) < 0)
+        return -1;
+
+    if (app_fetch(f) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static void sighandler(flatpak_t *f, int signum)
+{
+    UNUSED_ARG(f);
+
+    switch (signum) {
+    case SIGHUP:
+        log_info("received SIGHUP");
+        break;
+    case SIGINT:
+        log_info("received SIGINT");
+        mainloop_quit(f, 0);
+        break;
+    case SIGTERM:
+        log_info("received SIGTERM");
+        mainloop_quit(f, 0);
+        break;
+    default:
+        break;
+    }
+}
+
+
+static void setup_signals(flatpak_t *f)
+{
+    sigset_t ss;
+
+    sigemptyset(&ss);
+    sigaddset(&ss, SIGHUP);
+    sigaddset(&ss, SIGINT);
+    sigaddset(&ss, SIGQUIT);
+    sigaddset(&ss, SIGTERM);
+
+    mainloop_watch_signals(f, &ss, sighandler);
+}
+
+
+static void monitor_cb(flatpak_t *f)
+{
+    if (f->updating)
+        return;
+
+    f->updating = 1;
+
+    switch (f->command) {
+    case COMMAND_FETCH:  fetch_updates(f);     break;
+    case COMMAND_APPLY:  update_cached(f);     break;
+    case COMMAND_UPDATE: fetch_and_update(f);  break;
+    default:
+        break;
+    }
+
+    f->updating = 0;
+}
+
+
+static void setup_monitor(flatpak_t *f)
+{
+    mainloop_enable_monitor(f, monitor_cb);
+}
+
+
+int main(int argc, char **argv)
+{
+    flatpak_t f;
+
+    config_parse_cmdline(&f, argc, argv);
+
+    if (f.poll_interval > 0 || f.command == COMMAND_START) {
+        mainloop_create(&f);
+        setup_signals(&f);
+
+        if (f.command != COMMAND_START)
+            setup_monitor(&f);
+    }
+
+    switch (f.command) {
+    case COMMAND_GENERATE: generate_sessions(&f); break;
+    case COMMAND_START:    start_session(&f);     break;
+    case COMMAND_STOP:     stop_session(&f);      break;
+    case COMMAND_FETCH:    fetch_updates(&f);     break;
+    case COMMAND_APPLY:    update_cached(&f);     break;
+    case COMMAND_UPDATE:   fetch_and_update(&f);  break;
+    default:
+        log_error("unknown command");
+        exit(1);
+    }
+
+    if (f.poll_interval > 0)
+        mainloop_run(&f);
+
+    return f.exit_code;
+}
