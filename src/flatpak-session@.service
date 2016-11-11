@@ -9,7 +9,8 @@ StandardInput=null
 StandardOutput=journal
 StandardError=journal
 PAMName=login
-ExecStart=/usr/bin/flatpak-session -vvv start
+RestartForceExitStatus=69
+ExecStart=/usr/bin/flatpak-session -vvv start -r 69
 
 [Install]
 WantedBy=multi-user.target
