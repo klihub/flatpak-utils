@@ -6,7 +6,9 @@ PATHDEFS    = -DSYSCONFDIR=\"${sysconfdir}\" \
               -DLIBDIR=\"${libdir}\" \
               -DLIBEXECDIR=\"${libexecdir}\"
 
-systemd_DATA = flatpak-session@.service flatpak-sessions.target
+systemd_DATA = flatpak-session@.service \
+               flatpak-sessions.target \
+	       flatpak-update.service
 systemddir   = ${libdir}/systemd/system
 
 generator_PROGRAMS = flatpak-session-enable
