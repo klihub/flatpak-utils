@@ -36,13 +36,8 @@ static application_t *app_register(flatpak_t *f, FlatpakInstalledRef *a)
     application_t *app;
     remote_t      *r;
     const char    *origin;
-    GBytes        *bytes;
-    const void    *data;
-    size_t         size;
-    GError        *e;
 
     app    = NULL;
-    bytes  = NULL,
     origin = flatpak_installed_ref_get_origin(a);
     r      = remote_lookup(f, origin);
 
@@ -54,25 +49,11 @@ static application_t *app_register(flatpak_t *f, FlatpakInstalledRef *a)
 
     app->app      = a;
     app->origin   = origin;
-    app->metadata = g_key_file_new();
 
-    if (app->metadata == NULL)
+    if (ftpk_load_metadata(app, FALSE) < 0)
         goto fail;
 
-    bytes = flatpak_installed_ref_load_metadata(a, NULL, &e);
-
-    if (bytes == NULL)
-        goto fail_no_metadata;
-
-    data = g_bytes_get_data(bytes, &size);
-
-    if (!g_key_file_load_from_data(app->metadata, data, size, 0, &e))
-        goto fail_no_metadata;
-
-    g_bytes_unref(bytes);
-    bytes = NULL;
-
-    app->name = app_metadata_get(app, "Application", "name");
+    app->name = ftpk_get_metadata(app, "Application", "name");
 
     if (app->name == NULL)
         goto discard_no_name;
@@ -92,15 +73,12 @@ static application_t *app_register(flatpak_t *f, FlatpakInstalledRef *a)
  discard:
     goto fail;
 
- fail_no_metadata:
-    log_error("failed to load application metadata (%s: %d:%s)",
-              g_quark_to_string(e->domain), e->code, e->message);
  fail:
     if (app != NULL) {
-        g_key_file_unref(app->metadata);
+        if (app->metadata != NULL)
+            g_key_file_unref(app->metadata);
         free(app);
     }
-    g_bytes_unref(bytes);
     return NULL;
 }
 
@@ -178,11 +156,4 @@ int app_update(flatpak_t *f)
     }
 
     return status;
-}
-
-
-const char *app_metadata_get(application_t *app, const char *section,
-                             const char *key)
-{
-    return g_key_file_get_value(app->metadata, section, key, NULL);
 }

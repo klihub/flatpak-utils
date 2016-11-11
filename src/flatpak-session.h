@@ -131,9 +131,11 @@ typedef struct {
 /* an installed application */
 typedef struct {
     FlatpakInstalledRef *app;            /* flatpak application */
-    const char          *name;           /* application name */
     const char          *origin;         /* application origin (remote name) */
     GKeyFile            *metadata;       /* application metadata */
+    const char          *name;           /* application name */
+    const char          *urgency;        /* update urgency */
+    int                  autostart : 1;  /* whether to autostart */
 } application_t;
 
 /*
@@ -181,6 +183,9 @@ int ftpk_update_cached(flatpak_t *f, application_t *app);
 int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
                     int sig);
 int ftpk_stop_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session);
+int ftpk_load_metadata(application_t *app, int reload);
+const char *ftpk_get_metadata(application_t *app, const char *section,
+                              const char *key);
 
 /* remote.c */
 int remote_discover(flatpak_t *f);
@@ -191,8 +196,6 @@ remote_t *remote_for_user(flatpak_t *f, uid_t uid);
 
 /* application.c */
 int app_discover(flatpak_t *f);
-const char *app_metadata_get(application_t *app, const char *section,
-                             const char *key);
 int app_fetch_updates(flatpak_t *f, application_t *app);
 int app_update_cached(flatpak_t *f, application_t *app);
 int app_fetch(flatpak_t *f);

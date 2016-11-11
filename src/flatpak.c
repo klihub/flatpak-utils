@@ -157,6 +157,72 @@ int ftpk_discover_apps(flatpak_t *f)
 }
 
 
+int ftpk_load_metadata(application_t *app, int reload)
+{
+    GBytes     *bytes;
+    const void *data;
+    size_t      size;
+    const char *start;
+    GError     *e;
+
+    if (app->metadata != NULL && !reload)
+        return 0;
+
+    bytes = NULL;
+
+    if (app->metadata != NULL)
+        g_key_file_unref(app->metadata);
+    app->metadata = g_key_file_new();
+
+    if (app->metadata == NULL)
+        goto fail;
+
+    e     = NULL;
+    bytes = flatpak_installed_ref_load_metadata(app->app, NULL, &e);
+
+    if (bytes == NULL)
+        goto fail_no_metadata;
+
+    data = g_bytes_get_data(bytes, &size);
+
+    if (!g_key_file_load_from_data(app->metadata, data, size, 0, &e))
+        goto fail_no_metadata;
+
+    g_bytes_unref(bytes);
+
+    app->name    = ftpk_get_metadata(app, "Application", "name");
+    app->urgency = ftpk_get_metadata(app, "Application", "urgency");
+    start        = ftpk_get_metadata(app, "Application", "autostart");
+
+    if (start && (!strcasecmp(start, "true") || !strcasecmp(start, "yes")))
+        app->autostart = 1;
+
+    return 0;
+
+ fail_no_metadata:
+    log_error("failed to load application metadata (%s: %d:%s)",
+              g_quark_to_string(e->domain), e->code, e->message);
+ fail:
+    if (app != NULL) {
+        if (app->metadata != NULL)
+            g_key_file_unref(app->metadata);
+        free(app);
+    }
+    g_bytes_unref(bytes);
+    return -1;
+}
+
+
+const char *ftpk_get_metadata(application_t *app, const char *section,
+                              const char *key)
+{
+    ftpk_load_metadata(app, 0);
+
+    return g_key_file_get_value(app->metadata, section, key, NULL);
+}
+
+
+
 static void update_progress_cb(const char *status, guint progress,
                                gboolean estim, gpointer user_data)
 {
@@ -188,8 +254,12 @@ int ftpk_fetch_updates(flatpak_t *f, application_t *app)
 
     if (u == app->app || (u == NULL && e->code == 0))
         log_info("no pending updates");
-    else if (u != NULL)
-        log_info("pending updates fetched");
+    else if (u != NULL) {
+        ftpk_load_metadata(app, TRUE);
+        log_info("pending updates fetched (urgency: %s, start: %s)",
+                 app->urgency ? app->urgency : "<unknown>",
+                 app->autostart ? "yes" : "no");
+    }
     else
         goto fetch_failed;
 
@@ -221,8 +291,10 @@ int ftpk_update_cached(flatpak_t *f, application_t *app)
 
     if (u == app->app || (u == NULL && e->code == 0))
         log_info("%s/%s is already up-to-date", app->origin, name);
-    else if (u != NULL)
+    else if (u != NULL) {
+        ftpk_load_metadata(app, TRUE);
         log_info("%s/%s updated", app->origin, name);
+    }
     else
         goto update_failed;
 
