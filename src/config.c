@@ -60,6 +60,9 @@ static void print_usage(const char *argv0, int exit_code, const char *fmt, ...)
             "  -v, --verbose             increase logging verbosity\n"
             "  -h, --help                print this help message\n"
             "\n"
+            "The possible options for start are:\n"
+            "  -r, --restart-status <n>  use n for forced restart exit status\n"
+            "\n"
             "The possible options for update are:\n"
             "  -f, --fetch               just fetch, don't update\n"
             "  -l, --local               update locally from fetched changes\n"
@@ -94,33 +97,42 @@ static void set_defaults(flatpak_t *f, char **argv)
 
     if (is_systemd_generator(argv[0]))
         f->command = COMMAND_GENERATE;
-    else
-        f->command = COMMAND_START;
+    else {
+        f->command        = COMMAND_START;
+        f->restart_status = 69;
+    }
 }
 
 
 static void parse_interval(flatpak_t *f, const char *str)
 {
+#   define SUFFIX(_e, _s, _l, _p)                                       \
+       (!strcmp(_e, _s) || (_l && !strcmp(_e, _l)) || (_p && !strcmp(_e, _p)))
     char   *end;
     double  d;
+
 
     d = strtod(str, &end);
 
     if (end != NULL && *end != '\0') {
-        if (!strcmp(end, "s") || !strcmp(end, "sec"))
+        if (SUFFIX(end, "s", "sec", "secs"))
             f->poll_interval = d < 30 ? 30 : (int)d;
-        if (!strcmp(end, "m") || !strcmp(end, "min"))
+        else if (SUFFIX(end, "m", "min", "mins"))
             f->poll_interval = (int)(d * 60);
-        if (!strcmp(end, "h") || !strcmp(end, "hour") || !strcmp(end, "hours"))
+        else if (SUFFIX(end, "h", "hour", "hours"))
             f->poll_interval = (int)(d * 60 * 60);
-        if (!strcmp(end, "d") || !strcmp(end, "day") || !strcmp(end, "days"))
+        else if (SUFFIX(end, "d", "day", "days"))
             f->poll_interval = (int)(d * 24 * 60 * 60);
         else
             print_usage(f->argv0, EINVAL, "invalid poll interval '%s'", str);
     }
+    else
+        f->poll_interval = (int)d;
 
     if (f->poll_interval < FLATPAK_POLL_MIN_INTERVAL)
         f->poll_interval = FLATPAK_POLL_MIN_INTERVAL;
+
+#   undef SUFFIX
 }
 
 
@@ -222,14 +234,49 @@ static void parse_enable_options(flatpak_t *f, int argc, char **argv)
 }
 
 
+static void parse_start_options(flatpak_t *f, int argc, char **argv)
+{
+#   define OPTIONS "r:"
+    static struct option options[] = {
+        { "restart-status", required_argument, NULL, 'r' },
+        { NULL, 0, NULL, 0 },
+    };
+
+    int   opt;
+    char *e;
+
+    if (optind >= argc)
+        return;
+
+    while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
+        switch (opt) {
+        case 'r':
+            f->restart_status = strtol(optarg, &e, 10);
+
+            if (e && *e) {
+                print_usage(argv[0], EINVAL, "invalid restart status '%s'",
+                            optarg);
+            }
+            break;
+
+        case '?':
+            print_usage(argv[0], EINVAL, "invalid start option");
+            break;
+        }
+    }
+#   undef OPTIONS
+}
+
+
 static void parse_update_options(flatpak_t *f, int argc, char **argv)
 {
-#   define OPTIONS "-flm:i"
+#   define OPTIONS "-flmi:"
     static struct option options[] = {
         { "fetch"        , no_argument      , NULL, 'f' },
         { "local"        , no_argument      , NULL, 'l' },
         { "monitor"      , no_argument      , NULL, 'm' },
         { "poll-interval", required_argument, NULL, 'i' },
+        { NULL, 0, NULL, 0 },
     };
 
     int opt;
@@ -279,6 +326,7 @@ static void parse_update_options(flatpak_t *f, int argc, char **argv)
             break;
         }
     }
+#   undef OPTIONS
 }
 
 
@@ -295,6 +343,9 @@ void config_parse_cmdline(flatpak_t *f, int argc, char **argv)
     switch (f->command) {
     case COMMAND_GENERATE:
         parse_enable_options(f, argc, argv);
+        break;
+    case COMMAND_START:
+        parse_start_options(f, argc, argv);
         break;
     case COMMAND_UPDATE:
         parse_update_options(f, argc, argv);

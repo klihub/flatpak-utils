@@ -121,6 +121,8 @@ static void sighandler(flatpak_t *f, int signum)
     switch (signum) {
     case SIGHUP:
         log_info("received SIGHUP");
+        if (f->command == COMMAND_START)
+            exit(f->restart_status);
         break;
     case SIGINT:
         log_info("received SIGINT");
@@ -201,7 +203,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    if (f.poll_interval > 0)
+    if (f.poll_interval > 0 || f.command == COMMAND_START)
         mainloop_run(&f);
 
     return f.exit_code;

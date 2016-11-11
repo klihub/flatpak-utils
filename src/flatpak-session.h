@@ -114,6 +114,7 @@ struct flatpak_s {
     command_t            command;        /* action to perform */
     char               **chosen;         /* remotes given on commandline */
     int                  nchosen;        /* number of chosen remotes */
+    int                  restart_status; /* exit status for forced restart */
     int                  poll_interval;  /* update polling interval */
     int                  dry_run : 1;    /* don't perform, just show actions */
     int                  gpg_verify : 1; /* ignore unverifiable remotes */
