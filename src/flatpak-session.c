@@ -132,6 +132,18 @@ static void sighandler(flatpak_t *f, int signum)
         log_info("received SIGTERM");
         mainloop_quit(f, 0);
         break;
+    case SIGURG:
+        log_info("received SIGURG");
+        switch (f->command) {
+        case COMMAND_FETCH:
+            fetch_updates(f);
+            break;
+        case COMMAND_UPDATE:
+            fetch_and_update(f);
+            break;
+        default:
+            break;
+        }
     default:
         break;
     }
@@ -147,6 +159,7 @@ static void setup_signals(flatpak_t *f)
     sigaddset(&ss, SIGINT);
     sigaddset(&ss, SIGQUIT);
     sigaddset(&ss, SIGTERM);
+    sigaddset(&ss, SIGURG);
 
     mainloop_watch_signals(f, &ss, sighandler);
 }
