@@ -292,6 +292,8 @@ int ftpk_update_cached(flatpak_t *f, application_t *app)
     if (u == app->app || (u == NULL && e->code == 0))
         log_info("%s/%s is already up-to-date", app->origin, name);
     else if (u != NULL) {
+        g_object_unref(app->app);
+        app->app = u;
         ftpk_load_metadata(app, TRUE);
         log_info("%s/%s updated", app->origin, name);
     }
