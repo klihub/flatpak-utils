@@ -110,6 +110,9 @@ static int fetch_and_update(flatpak_t *f)
     if (app_fetch(f) < 0)
         return -1;
 
+    if (app_update(f) < 0)
+        return -1;
+
     return 0;
 }
 
