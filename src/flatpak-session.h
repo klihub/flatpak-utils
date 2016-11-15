@@ -73,8 +73,17 @@
 #    define FLATPAK_BWRAP "flatpak-bwrap"
 #endif
 
-#define FLATPAK_POLL_MIN_INTERVAL /*(5 * 60)*/ 15
+#ifndef FLATPAK_SESSION_PATH
+#    define FLATPAK_SESSION_PATH "/usr/bin/flatpak-session"
+#endif
 
+#ifndef FLATPAK_GECOS_PREFIX
+#    define FLATPAK_GECOS_PREFIX "flatpak user for "
+#endif
+
+#ifndef FLATPAK_POLL_MIN_INTERVAL
+#    define FLATPAK_POLL_MIN_INTERVAL /*(5 * 60)*/ 15
+#endif
 
 /* mark unused arguments and silence the compiler about them */
 #define UNUSED_ARG(arg) (void)arg
@@ -87,6 +96,7 @@ typedef enum {
     COMMAND_GENERATE,                    /* generate a systemd session */
     COMMAND_START,                       /* start flatpaks for a session */
     COMMAND_STOP,                        /* stop flatpaks for a session */
+    COMMAND_SIGNAL,                      /* signal a flatpak session */
     COMMAND_FETCH,                       /* fetch updates from remotes */
     COMMAND_APPLY,                       /* update flatpaks from local cache */
     COMMAND_UPDATE,                      /* fetch updates and apply them */
@@ -94,26 +104,26 @@ typedef enum {
 
 /* runtime context */
 typedef struct flatpak_s flatpak_t;
+
 struct flatpak_s {
     FlatpakInstallation *f;              /* flatpak context */
-    GPtrArray           *f_remotes;      /* array of flatpak remotes */
-    GPtrArray           *f_apps;         /* array of flatpak apps */
     GHashTable          *remotes;        /* remotes for applications */
     GHashTable          *apps;           /* installed applications */
     GMainLoop           *loop;           /* main loop */
     void               (*sighandler)(flatpak_t *f, int sig);
+    sigset_t             blocked;        /* signals we block */
     int                  sfd;            /* signalfd */
     GIOChannel          *sio;            /* GIOChannel for our signalfd */
     guint                sid;            /* GIOChannel watch source id */
     void               (*monitor)(flatpak_t *f);
     guint                mid;            /* monitoring timer source id */
     int                  exit_code;      /* exit code to exit with */
+    /* things coming from command line/configuration */
     const char          *argv0;          /* us... */
     const char          *dir_service;    /* systemd generator service dir. */
-    uid_t                user;           /* user id to stop session for */
+    uid_t                uid;            /* user id to stop session for */
+    int                  sig;            /* signal to send to a session */
     command_t            command;        /* action to perform */
-    char               **chosen;         /* remotes given on commandline */
-    int                  nchosen;        /* number of chosen remotes */
     int                  restart_status; /* exit status for forced restart */
     int                  poll_interval;  /* update polling interval */
     int                  dry_run : 1;    /* don't perform, just show actions */
@@ -175,44 +185,67 @@ void mainloop_disable_monitor(flatpak_t *f);
 
 
 /* flatpak.c */
-int ftpk_discover_remotes(flatpak_t *f);
-int ftpk_discover_apps(flatpak_t *f);
+void ftpk_exit(flatpak_t *f);
+int ftpk_discover_remotes(flatpak_t *f,
+                          int (*cb)(flatpak_t *, FlatpakRemote *, const char *));
+int ftpk_discover_apps(flatpak_t *f,
+                       int (*cb)(flatpak_t *, FlatpakInstalledRef *,
+                                 const char *, const char *, GKeyFile *));
 int ftpk_launch_app(flatpak_t *f, application_t *app);
+
 int ftpk_fetch_updates(flatpak_t *f, application_t *app);
-int ftpk_update_cached(flatpak_t *f, application_t *app);
-int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
-                    int sig);
-int ftpk_stop_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session);
-int ftpk_load_metadata(application_t *app, int reload);
-const char *ftpk_get_metadata(application_t *app, const char *section,
-                              const char *key);
+int ftpk_apply_updates(flatpak_t *f, application_t *app);
+int ftpk_update_app(flatpak_t *f, application_t *app);
+int ftpk_signal_app(application_t *app, uid_t uid, pid_t session, int sig);
+int ftpk_stop_app(application_t *app, uid_t uid, pid_t session);
+int ftpk_signal_session(uid_t uid, int sig);
+GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r);
+void ftpk_free_metadata(GKeyFile *f);
+const char *ftpk_get_metadata(GKeyFile *f, const char *section, const char *key);
+pid_t ftpk_session_pid(uid_t uid);
 
 /* remote.c */
 int remote_discover(flatpak_t *f);
-uid_t remote_resolve_usr(const char *name, char *buf, size_t size);
+uid_t remote_resolve_user(const char *name, char *buf, size_t size);
 remote_t *remote_lookup(flatpak_t *f, const char *name);
 const char *remote_username(remote_t *r, char *buf, size_t size);
+const char *remote_url(remote_t *r, char *buf, size_t size);
 remote_t *remote_for_user(flatpak_t *f, uid_t uid);
+
+#define foreach_remote(_f, _r)                                          \
+    GHashTableIter _r##_it;                                             \
+    g_hash_table_iter_init(&_r##_it, _f->remotes);                      \
+    while (g_hash_table_iter_next(&_r##_it, NULL, (void **)&_r))
 
 /* application.c */
 int app_discover(flatpak_t *f);
+application_t *app_lookup(flatpak_t *f, const char *name);
 int app_fetch_updates(flatpak_t *f, application_t *app);
 int app_update_cached(flatpak_t *f, application_t *app);
 int app_fetch(flatpak_t *f);
 int app_update(flatpak_t *f);
 
+#define foreach_app(_f, _a)                                             \
+    GHashTableIter _a##_it;                                             \
+    g_hash_table_iter_init(&_a##_it, _f->apps);                         \
+    while (g_hash_table_iter_next(&_a##_it, NULL, (void **)&_a))
+
 /* session.c */
 int session_enable(flatpak_t *f);
+int session_list(flatpak_t *f);
 int session_start(flatpak_t *f);
 int session_stop(flatpak_t *f);
+int session_signal(flatpak_t *f);
 
 /* filesystem.c */
-int fsys_prepare_sessions(flatpak_t *f);
+int fsys_prepare_session(flatpak_t *f);
 char *fsys_mkpath(char *path, size_t size, const char *fmt, ...);
 int fsys_mkdir(const char *path, mode_t mode);
 int fsys_mkdirp(mode_t, const char *fmt, ...);
 int fsys_symlink(const char *path, const char *dst);
 char *fsys_service_path(flatpak_t *f, const char *usr, char *path, size_t size);
 char *fsys_service_link(flatpak_t *f, const char *usr, char *path, size_t size);
+int fs_scan_proc(const char *exe, uid_t uid,
+                 int (*cb)(pid_t pid, void *user_data), void *user_data);
 
 #endif /* __FLATPAK_SESSION_H__ */

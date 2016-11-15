@@ -28,6 +28,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
@@ -41,7 +42,7 @@
 #include "flatpak-session.h"
 
 
-int fsys_prepare_sessions(flatpak_t *f)
+int fsys_prepare_session(flatpak_t *f)
 {
     char *dir = fsys_mkpath(NULL, 0, "%s/%s.wants",
                             f->dir_service, FLATPAK_TARGET);
@@ -267,4 +268,79 @@ char *fsys_service_link(flatpak_t *f, const char *usr, char *path, size_t size)
  overflow:
     errno = EOVERFLOW;
     return NULL;
+}
+
+
+int fs_scan_proc(const char *exe, uid_t uid,
+                 int (*cb)(pid_t pid, void *user_data), void *user_data)
+{
+    DIR           *dp;
+    struct dirent *de;
+    struct stat    st;
+    char           file[PATH_MAX], *bin;
+    int            n, status;
+
+    if ((dp = opendir("/proc")) == NULL)
+        return -1;
+
+    while ((de = readdir(dp)) != NULL) {
+        printf("got dir entry '%s'...\n", de->d_name);
+
+        if (!('0' <= de->d_name[0] && de->d_name[0] <= '9'))
+            continue;
+
+        snprintf(file, sizeof(file), "/proc/%s/exe", de->d_name);
+
+        printf("checking %s...\n", file);
+
+        if (lstat(file, &st) != 0)
+            continue;
+
+        if (uid != (uid_t)-1 && st.st_uid != uid)
+            continue;
+
+        printf("user check ok\n");
+
+        if ((n = readlink(file, file, sizeof(file))) < 0)
+            continue;
+
+        file[n] = '\0';
+
+        printf("exe points to %s...\n", file);
+
+        if (exe[0] == '/') {
+            bin = file;
+        }
+        else {
+            if ((bin = strrchr(file, '/')) != NULL)
+                bin++;
+            else
+                bin = file;
+        }
+
+        printf("exe: '%s', bin: '%s'\n", exe, bin);
+
+        if (!strcmp(exe, bin)) {
+            status = cb((pid_t)strtoul(de->d_name, NULL, 10), user_data);
+
+            printf("pid_check status for %s: %d\n", de->d_name, status);
+
+            if (status == 0)
+                break;
+
+            if (status < 0)
+                goto fail;
+        }
+    }
+
+    closedir(dp);
+
+    printf("fs scan done\n");
+
+    return 0;
+
+ fail:
+    closedir(dp);
+
+    return -1;
 }

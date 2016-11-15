@@ -34,15 +34,13 @@
 
 #include "flatpak-session.h"
 
-#define FLATPAK_GECOS "flatpak user for "
-
 
 static inline int check_gecos(const char *gecos, const char *usr)
 {
-    const char *prefix = FLATPAK_GECOS;
-    int         size   = sizeof(FLATPAK_GECOS) - 1;
+    const char *prefix = FLATPAK_GECOS_PREFIX;
+    int         size   = sizeof(FLATPAK_GECOS_PREFIX) - 1;
 
-    return !strncmp(gecos, prefix, size) | !strcmp(gecos + size, usr);
+    return !strncmp(gecos, prefix, size) && !strcmp(gecos + size, usr);
 }
 
 
@@ -92,66 +90,87 @@ uid_t remote_resolve_user(const char *remote, char *usrbuf, size_t size)
 }
 
 
+static void r_free(gpointer data)
+{
+    remote_t *r = data;
+
+    if (r == NULL)
+        return;
+
+    g_object_unref(r->r);
+    free(r);
+}
+
+
+static int remote_cb(flatpak_t *f, FlatpakRemote *r, const char *name)
+{
+    remote_t *remote;
+    uid_t     uid;
+
+    if ((uid = remote_resolve_user(name, NULL, 0)) == (uid_t)-1) {
+        log_warning("remote %s: no associated user, ignoring...", name);
+        return 0;
+    }
+
+    if (uid != f->uid && f->uid != 0) {
+        log_warning("remote %s: for other user %d (!= %d), ignoring...", name,
+                    f->uid, uid);
+        return 0;
+    }
+
+    if ((remote = calloc(1, sizeof(*r))) == NULL)
+        return -1;
+
+    remote->r    = g_object_ref(r);
+    remote->name = name;
+    remote->uid  = uid;
+
+    if (!g_hash_table_insert(f->remotes, (void *)name, remote)) {
+        r_free(remote);
+        return -1;
+    }
+
+    log_info("discovered remote %s", remote->name);
+
+    return 0;
+}
+
+
 int remote_discover(flatpak_t *f)
 {
-    FlatpakRemote *r;
-    remote_t      *remote;
-    const char    *name;
-    uid_t          uid;
-    int            i;
-
     if (f->remotes != NULL)
         return 0;
 
-    f->remotes = g_hash_table_new(g_str_hash, g_str_equal);
+    f->remotes = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, r_free);
 
     if (f->remotes == NULL)
-        goto fail;
+        return -1;
 
-    if (ftpk_discover_remotes(f) < 0)
-        goto fail;
-
-    for (i = 0; i < (int)f->f_remotes->len; i++) {
-        r    = g_ptr_array_index(f->f_remotes, i);
-        name = flatpak_remote_get_name(r);
-        uid  = remote_resolve_user(name, NULL, 0);
-
-        if (uid == (uid_t)-1) {
-            log_warning("remote %s: no associated user, skipping...", name);
-            continue;
-        }
-
-        if ((remote = calloc(1, sizeof(*remote))) == NULL)
-            goto fail;
-
-        remote->r    = r;
-        remote->name = name;
-        remote->uid  = uid;
-
-        if (!g_hash_table_insert(f->remotes, (void *)name, remote))
-            goto fail;
-    }
+    if (ftpk_discover_remotes(f, remote_cb) < 0)
+        return -1;
 
     return 0;
+}
 
- fail:
-    return -1;
+
+void remote_forget(flatpak_t *f)
+{
+    g_hash_table_destroy(f->remotes);
+    f->remotes = NULL;
 }
 
 
 remote_t *remote_lookup(flatpak_t *f, const char *name)
 {
-    return f->remotes ? g_hash_table_lookup(f->remotes, name) : NULL;
+    return f && f->remotes ? g_hash_table_lookup(f->remotes, name) : NULL;
 }
 
 
 remote_t *remote_for_user(flatpak_t *f, uid_t uid)
 {
-    GHashTableIter  it;
-    remote_t       *r;
+    remote_t *r;
 
-    g_hash_table_iter_init(&it, f->remotes);
-    while (g_hash_table_iter_next(&it, NULL, (void **)&r)) {
+    foreach_remote(f, r) {
         if (r->uid == uid)
             return r;
     }
@@ -176,6 +195,25 @@ const char *remote_username(remote_t *r, char *buf, size_t size)
         return NULL;
 
     strncpy(buf, pw->pw_name, size - 1);
+    buf[size - 1] = '\0';
+
+    return buf;
+}
+
+
+const char *remote_url(remote_t *r, char *buf, size_t size)
+{
+    static char  url[1024];
+    char        *p;
+
+    p = flatpak_remote_get_url(r->r);
+
+    if (buf == NULL) {
+        buf  = url;
+        size = sizeof(url);
+    }
+
+    strncpy(buf, p, size - 1);
     buf[size - 1] = '\0';
 
     return buf;

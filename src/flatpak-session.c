@@ -38,8 +38,6 @@ static void setup_signals(flatpak_t *f);
 
 static int generate_sessions(flatpak_t *f)
 {
-    log_info("generating flatpak sessions...");
-
     if (remote_discover(f) < 0)
         return -1;
 
@@ -50,10 +48,19 @@ static int generate_sessions(flatpak_t *f)
 }
 
 
+static int list_sessions(flatpak_t *f)
+{
+    if (app_discover(f) < 0)
+        return -1;
+
+    session_list(f);
+
+    return 0;
+}
+
+
 static int start_session(flatpak_t *f)
 {
-    log_info("starting flatpak session for user %d", geteuid());
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -66,7 +73,23 @@ static int start_session(flatpak_t *f)
 
 static int stop_session(flatpak_t *f)
 {
-    log_info("stopping flatpak session for user %d", f->user);
+    if (app_discover(f) < 0)
+        return -1;
+
+    if (session_stop(f) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+static int signal_session(flatpak_t *f)
+{
+    if (app_discover(f) < 0)
+        return -1;
+
+    if (session_signal(f) < 0)
+        return -1;
 
     return 0;
 }
@@ -74,8 +97,6 @@ static int stop_session(flatpak_t *f)
 
 static int fetch_updates(flatpak_t *f)
 {
-    log_info("fetching updates...");
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -88,8 +109,6 @@ static int fetch_updates(flatpak_t *f)
 
 static int update_cached(flatpak_t *f)
 {
-    log_info("applying cached updates...");
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -102,8 +121,6 @@ static int update_cached(flatpak_t *f)
 
 static int fetch_and_update(flatpak_t *f)
 {
-    log_info("fetching updates and updating applications...");
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -119,7 +136,10 @@ static int fetch_and_update(flatpak_t *f)
 
 static void sighandler(flatpak_t *f, int signum)
 {
-    UNUSED_ARG(f);
+    if (f->command == COMMAND_START) {
+        f->sig = signum;
+        session_signal(f);
+    }
 
     switch (signum) {
     case SIGHUP:
@@ -155,16 +175,14 @@ static void sighandler(flatpak_t *f, int signum)
 
 static void setup_signals(flatpak_t *f)
 {
-    sigset_t ss;
+    sigemptyset(&f->blocked);
+    sigaddset(&f->blocked, SIGHUP);
+    sigaddset(&f->blocked, SIGINT);
+    sigaddset(&f->blocked, SIGQUIT);
+    sigaddset(&f->blocked, SIGTERM);
+    sigaddset(&f->blocked, SIGURG);
 
-    sigemptyset(&ss);
-    sigaddset(&ss, SIGHUP);
-    sigaddset(&ss, SIGINT);
-    sigaddset(&ss, SIGQUIT);
-    sigaddset(&ss, SIGTERM);
-    sigaddset(&ss, SIGURG);
-
-    mainloop_watch_signals(f, &ss, sighandler);
+    mainloop_watch_signals(f, &f->blocked, sighandler);
 }
 
 
@@ -193,24 +211,28 @@ static void setup_monitor(flatpak_t *f)
 }
 
 
+static inline int needs_mainloop(flatpak_t *f)
+{
+    return (f->poll_interval > 0 ||
+            f->command == COMMAND_START || f->command == COMMAND_STOP);
+}
+
+
 int main(int argc, char **argv)
 {
     flatpak_t f;
 
     config_parse_cmdline(&f, argc, argv);
 
-    if (f.poll_interval > 0 || f.command == COMMAND_START) {
+    if (needs_mainloop(&f))
         mainloop_create(&f);
-        setup_signals(&f);
-
-        if (f.command != COMMAND_START)
-            setup_monitor(&f);
-    }
 
     switch (f.command) {
     case COMMAND_GENERATE: generate_sessions(&f); break;
+    case COMMAND_LIST:     list_sessions(&f);     break;
     case COMMAND_START:    start_session(&f);     break;
     case COMMAND_STOP:     stop_session(&f);      break;
+    case COMMAND_SIGNAL:   signal_session(&f);    break;
     case COMMAND_FETCH:    fetch_updates(&f);     break;
     case COMMAND_APPLY:    update_cached(&f);     break;
     case COMMAND_UPDATE:   fetch_and_update(&f);  break;
@@ -219,8 +241,14 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    if (f.poll_interval > 0 || f.command == COMMAND_START)
+    if (needs_mainloop(&f)) {
+        setup_signals(&f);
+
+        if (f.command != COMMAND_START)
+            setup_monitor(&f);
+
         mainloop_run(&f);
+    }
 
     return f.exit_code;
 }

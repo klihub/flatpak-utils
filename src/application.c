@@ -31,110 +31,102 @@
 #include "flatpak-session.h"
 
 
-static application_t *app_register(flatpak_t *f, FlatpakInstalledRef *a)
+static void a_free(gpointer data)
 {
-    application_t *app;
+    application_t *a = data;
+
+    if (a == NULL)
+        return;
+
+    g_object_unref(a->app);
+    if (a->metadata != NULL)
+        g_key_file_unref(a->metadata);
+
+    free(a);
+}
+
+
+static int app_cb(flatpak_t *f, FlatpakInstalledRef *a, const char *name,
+                  const char *origin, GKeyFile *meta)
+{
     remote_t      *r;
-    const char    *origin;
+    application_t *app;
 
-    app    = NULL;
-    origin = flatpak_installed_ref_get_origin(a);
-    r      = remote_lookup(f, origin);
+    r = remote_lookup(f, origin);
 
-    if (r == NULL)
-        goto discard_no_remote;
+    if (r == NULL) {
+        log_warning("app %s: no associated remote, ignoring...", name);
+        return 0;
+    }
 
     if ((app = calloc(1, sizeof(*app))) == NULL)
-        goto fail;
+        return -1;
 
-    app->app      = a;
+    app->app      = g_object_ref(a);
     app->origin   = origin;
+    app->name     = name;
+    app->metadata = g_key_file_ref(meta);
 
-    if (ftpk_load_metadata(app, FALSE) < 0)
-        goto fail;
-
-    app->name = ftpk_get_metadata(app, "Application", "name");
-
-    if (app->name == NULL)
-        goto discard_no_name;
-
-    if (!g_hash_table_insert(f->apps, (void *)app->name, app))
-        goto fail;
-
-    log_info("discovered application '%s' (from %s)", app->name, app->origin);
-
-    return app;
-
- discard_no_remote:
-    log_warning("ignoring application without tracked remote '%s'", origin);
-    goto discard;
- discard_no_name:
-    log_warning("ignoring application without a name");
- discard:
-    goto fail;
-
- fail:
-    if (app != NULL) {
-        if (app->metadata != NULL)
-            g_key_file_unref(app->metadata);
-        free(app);
+    if (!g_hash_table_insert(f->apps, (void *)name, app)) {
+        a_free(app);
+        return -1;
     }
-    return NULL;
+
+    log_info("discovered application %s/%s", app->origin, app->name);
+
+    return 0;
 }
 
 
 int app_discover(flatpak_t *f)
 {
-    int i;
-
     if (f->apps != NULL)
         return 0;
 
     if (remote_discover(f) < 0)
-        goto fail;
+        return -1;
 
-    f->apps = g_hash_table_new(g_str_hash, g_str_equal);
+    f->apps = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, a_free);
 
     if (f->apps == NULL)
-        goto fail;
+        return -1;
 
-    if (ftpk_discover_apps(f) < 0)
-        goto fail;
-
-    for (i = 0; i < (int)f->f_apps->len; i++)
-        app_register(f, g_ptr_array_index(f->f_apps, i));
+    if (ftpk_discover_apps(f, app_cb) < 0)
+        return -1;
 
     return 0;
-
- fail:
-    return -1;
 }
 
 
-int app_fetch_updates(flatpak_t *f, application_t *app)
+void app_forget(flatpak_t *f)
 {
-    return ftpk_fetch_updates(f, app);
+    g_hash_table_destroy(f->apps);
+    f->apps = NULL;
 }
 
 
-int app_update_cached(flatpak_t *f, application_t *app)
+application_t *app_lookup(flatpak_t *f, const char *name)
 {
-    return ftpk_update_cached(f, app);
+    return f && f->apps ? g_hash_table_lookup(f->apps, name) : NULL;
 }
 
 
 int app_fetch(flatpak_t *f)
 {
-    application_t  *app;
-    GHashTableIter  it;
-    int             status;
+    application_t *app;
+    int            status;
 
     status = 0;
 
-    g_hash_table_iter_init(&it, f->apps);
-    while (g_hash_table_iter_next(&it, NULL, (void **)&app)) {
-        if (ftpk_fetch_updates(f, app) < 0)
-            status = -1;
+    foreach_app(f, app) {
+        log_info("fetching updates for application %s/%s...",
+                 app->origin, app->name);
+
+        switch (ftpk_fetch_updates(f, app)) {
+        case 0:  log_info("no pending updates"); break;
+        case 1:  log_info("updates fetched");    break;
+        default: status = -1;                    break;
+        }
     }
 
     return status;
@@ -143,16 +135,20 @@ int app_fetch(flatpak_t *f)
 
 int app_update(flatpak_t *f)
 {
-    application_t  *app;
-    GHashTableIter  it;
-    int             status;
+    application_t *app;
+    int            status;
 
     status = 0;
 
-    g_hash_table_iter_init(&it, f->apps);
-    while (g_hash_table_iter_next(&it, NULL, (void **)&app)) {
-        if (ftpk_update_cached(f, app) < 0)
-            status = -1;
+    foreach_app(f, app) {
+        log_info("applying updates for application %s/%s...",
+                 app->origin, app->name);
+
+        switch (ftpk_apply_updates(f, app)) {
+        case 0:  log_info("no updates"); break;
+        case 1:  log_info("updated");    break;
+        default: status = -1;            break;
+        }
     }
 
     return status;

@@ -10,6 +10,7 @@ StandardOutput=journal
 StandardError=journal
 PAMName=login
 RestartForceExitStatus=69
+Type=simple
 ExecStart=/usr/bin/flatpak-session -vvv start -r 69
 
 [Install]
