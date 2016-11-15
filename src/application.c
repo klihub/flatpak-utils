@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include "flatpak-session.h"
 
-
+#if 0
 static application_t *app_register(flatpak_t *f, FlatpakInstalledRef *a)
 {
     application_t *app;
@@ -81,33 +81,17 @@ static application_t *app_register(flatpak_t *f, FlatpakInstalledRef *a)
     }
     return NULL;
 }
-
+#endif
 
 int app_discover(flatpak_t *f)
 {
-    int i;
+    return ftpk_discover_apps(f);
+}
 
-    if (f->apps != NULL)
-        return 0;
 
-    if (remote_discover(f) < 0)
-        goto fail;
-
-    f->apps = g_hash_table_new(g_str_hash, g_str_equal);
-
-    if (f->apps == NULL)
-        goto fail;
-
-    if (ftpk_discover_apps(f) < 0)
-        goto fail;
-
-    for (i = 0; i < (int)f->f_apps->len; i++)
-        app_register(f, g_ptr_array_index(f->f_apps, i));
-
-    return 0;
-
- fail:
-    return -1;
+application_t *app_lookup(flatpak_t *f, const char *name)
+{
+    return ftpk_app(f, name);
 }
 
 

@@ -73,6 +73,10 @@
 #    define FLATPAK_BWRAP "flatpak-bwrap"
 #endif
 
+#ifndef FLATPAK_GECOS_PREFIX
+#    define FLATPAK_GECOS_PREFIX "flatpak user for "
+#endif
+
 #define FLATPAK_POLL_MIN_INTERVAL /*(5 * 60)*/ 15
 
 
@@ -96,8 +100,6 @@ typedef enum {
 typedef struct flatpak_s flatpak_t;
 struct flatpak_s {
     FlatpakInstallation *f;              /* flatpak context */
-    GPtrArray           *f_remotes;      /* array of flatpak remotes */
-    GPtrArray           *f_apps;         /* array of flatpak apps */
     GHashTable          *remotes;        /* remotes for applications */
     GHashTable          *apps;           /* installed applications */
     GMainLoop           *loop;           /* main loop */
@@ -175,21 +177,23 @@ void mainloop_disable_monitor(flatpak_t *f);
 
 
 /* flatpak.c */
+void ftpk_exit(flatpak_t *f);
 int ftpk_discover_remotes(flatpak_t *f);
 int ftpk_discover_apps(flatpak_t *f);
+remote_t *ftpk_remote(flatpak_t *f, const char *name);
+application_t *ftpk_app(flatpak_t *f, const char *name);
 int ftpk_launch_app(flatpak_t *f, application_t *app);
 int ftpk_fetch_updates(flatpak_t *f, application_t *app);
 int ftpk_update_cached(flatpak_t *f, application_t *app);
 int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
                     int sig);
 int ftpk_stop_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session);
-int ftpk_load_metadata(application_t *app, int reload);
-const char *ftpk_get_metadata(application_t *app, const char *section,
-                              const char *key);
+GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r);
+const char *ftpk_get_metadata(GKeyFile *f, const char *section, const char *key);
 
 /* remote.c */
 int remote_discover(flatpak_t *f);
-uid_t remote_resolve_usr(const char *name, char *buf, size_t size);
+uid_t remote_resolve_user(const char *name, char *buf, size_t size);
 remote_t *remote_lookup(flatpak_t *f, const char *name);
 const char *remote_username(remote_t *r, char *buf, size_t size);
 remote_t *remote_for_user(flatpak_t *f, uid_t uid);
