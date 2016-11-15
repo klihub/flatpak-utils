@@ -443,7 +443,7 @@ int ftpk_fetch_updates(flatpak_t *f, application_t *app)
     const char          *origin = app->origin;
     const char          *name   = app->name;
     FlatpakRefKind       kind   = FLATPAK_REF_KIND_APP;
-    int                  flags  = FLATPAK_UPDATE_FLAGS_NO_DEPLOY;
+    int                  flags  = 0;
     GError              *e      = NULL;
     FlatpakInstalledRef *u;
 
