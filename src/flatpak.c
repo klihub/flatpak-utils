@@ -461,7 +461,7 @@ int ftpk_fetch_updates(flatpak_t *f, application_t *app)
         GKeyFile   *meta = ftpk_load_metadata(u);
         const char *urg  = ftpk_get_metadata(meta, "Application", "urgency");
         const char *ast  = ftpk_get_metadata(meta, "Application", "autostart");
-        const char *o, *n, *ol, *nl;
+        const char *o, *n, *ol, *nl, *odd, *ndd;
 
         log_info("pending updates fetched (urgency: %s, start: %s)",
                  urg ? urg : "<unknown>",
@@ -469,11 +469,13 @@ int ftpk_fetch_updates(flatpak_t *f, application_t *app)
 
         g_object_get(app->app, "latest-commit", &o, NULL);
         ol = flatpak_installed_ref_get_latest_commit(app->app);
+        g_object_get(app->app, "deploy-dir", &odd, NULL);
         g_object_get(u, "latest-commit", &n, NULL);
         nl = flatpak_installed_ref_get_latest_commit(u);
+        g_object_get(u, "deploy-dir", &ndd, NULL);
 
-        log_info("%s/%s updated (from %s/%s to %s/%s)", app->origin, name,
-                 o, ol, n, nl);
+        log_info("%s/%s updated (from %s/%s@%s to %s/%s@%s)", app->origin, name,
+                 o, ol, odd, n, nl, ndd);
 
     }
     else
