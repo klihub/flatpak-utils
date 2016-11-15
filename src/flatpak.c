@@ -461,10 +461,20 @@ int ftpk_fetch_updates(flatpak_t *f, application_t *app)
         GKeyFile   *meta = ftpk_load_metadata(u);
         const char *urg  = ftpk_get_metadata(meta, "Application", "urgency");
         const char *ast  = ftpk_get_metadata(meta, "Application", "autostart");
+        const char *o, *n, *ol, *nl;
 
         log_info("pending updates fetched (urgency: %s, start: %s)",
                  urg ? urg : "<unknown>",
                  ast ? ast : "<unknown>");
+
+        g_object_get(app->app, "latest-commit", &o, NULL);
+        ol = flatpak_installed_ref_get_latest_commit(app->app);
+        g_object_get(u, "latest-commit", &n, NULL);
+        nl = flatpak_installed_ref_get_latest_commit(u);
+
+        log_info("%s/%s updated (from %s/%s to %s/%s)", app->origin, name,
+                 o, ol, n, nl);
+
     }
     else
         goto fetch_failed;
@@ -498,10 +508,18 @@ int ftpk_update_cached(flatpak_t *f, application_t *app)
     if (u == app->app || (u == NULL && e->code == 0))
         log_info("%s/%s is already up-to-date", app->origin, name);
     else if (u != NULL) {
+        const char *o, *n, *ol, *nl;
+        g_object_get(app->app, "latest-commit", &o, NULL);
+        ol = flatpak_installed_ref_get_latest_commit(app->app);
+        g_object_get(u, "latest-commit", &n, NULL);
+        nl = flatpak_installed_ref_get_latest_commit(u);
+
+        log_info("%s/%s updated (from %s/%s to %s/%s)", app->origin, name,
+                 o, ol, n, nl);
+
         g_object_unref(app->app);
         app->app = g_object_ref(u);
         ftpk_load_metadata(app->app);
-        log_info("%s/%s updated", app->origin, name);
     }
     else
         goto update_failed;
