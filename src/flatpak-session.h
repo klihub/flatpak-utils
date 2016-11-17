@@ -73,6 +73,10 @@
 #    define FLATPAK_BWRAP "flatpak-bwrap"
 #endif
 
+#ifndef FLATPAK_SESSION_PATH
+#    define FLATPAK_SESSION_PATH "/usr/bin/flatpak-session"
+#endif
+
 #ifndef FLATPAK_GECOS_PREFIX
 #    define FLATPAK_GECOS_PREFIX "flatpak user for "
 #endif
@@ -183,12 +187,15 @@ int ftpk_discover_apps(flatpak_t *f);
 remote_t *ftpk_remote(flatpak_t *f, const char *name);
 application_t *ftpk_app(flatpak_t *f, const char *name);
 int ftpk_launch_app(flatpak_t *f, application_t *app);
+
 int ftpk_fetch_updates(flatpak_t *f, application_t *app);
-int ftpk_update_cached(flatpak_t *f, application_t *app);
+int ftpk_apply_updates(flatpak_t *f, application_t *app);
+int ftpk_update_app(flatpak_t *f, application_t *app);
 int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
                     int sig);
 int ftpk_stop_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session);
 GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r);
+void ftpk_free_metadata(GKeyFile *f);
 const char *ftpk_get_metadata(GKeyFile *f, const char *section, const char *key);
 
 /* remote.c */
@@ -208,7 +215,7 @@ int app_update(flatpak_t *f);
 /* session.c */
 int session_enable(flatpak_t *f);
 int session_start(flatpak_t *f);
-int session_stop(flatpak_t *f);
+int session_stop(flatpak_t *f, uid_t uid);
 
 /* filesystem.c */
 int fsys_prepare_sessions(flatpak_t *f);
@@ -218,5 +225,7 @@ int fsys_mkdirp(mode_t, const char *fmt, ...);
 int fsys_symlink(const char *path, const char *dst);
 char *fsys_service_path(flatpak_t *f, const char *usr, char *path, size_t size);
 char *fsys_service_link(flatpak_t *f, const char *usr, char *path, size_t size);
+int fs_scan_proc(const char *exe, uid_t uid,
+                 int (*cb)(pid_t pid, void *user_data), void *user_data);
 
 #endif /* __FLATPAK_SESSION_H__ */

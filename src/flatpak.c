@@ -60,8 +60,7 @@ static void a_free(gpointer data)
         return;
 
     g_object_unref(a->app);
-    if (a->metadata)
-        g_key_file_unref(a->metadata);
+    ftpk_free_metadata(a->metadata);
 
     free(a);
 }
@@ -413,10 +412,16 @@ GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r)
     log_error("failed to load application metadata (%s: %d:%s)",
               g_quark_to_string(e->domain), e->code, e->message);
  fail:
-    if (meta != NULL)
-        g_key_file_unref(meta);
+    ftpk_free_metadata(meta);
     g_bytes_unref(bytes);
     return NULL;
+}
+
+
+void ftpk_free_metadata(GKeyFile *meta)
+{
+    if (meta != NULL)
+        g_key_file_unref(meta);
 }
 
 
@@ -443,7 +448,7 @@ int ftpk_fetch_updates(flatpak_t *f, application_t *app)
     const char          *origin = app->origin;
     const char          *name   = app->name;
     FlatpakRefKind       kind   = FLATPAK_REF_KIND_APP;
-    int                  flags  = 0;
+    int                  flags  = FLATPAK_UPDATE_FLAGS_NO_DEPLOY;
     GError              *e      = NULL;
     FlatpakInstalledRef *u;
 
@@ -455,42 +460,37 @@ int ftpk_fetch_updates(flatpak_t *f, application_t *app)
     u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
                                     update_progress_cb, app, NULL, &e);
 
-    if (u == app->app || (u == NULL && e->code == 0))
-        log_info("no pending updates");
-    else if (u != NULL) {
-        GKeyFile   *meta = ftpk_load_metadata(u);
-        const char *urg  = ftpk_get_metadata(meta, "Application", "urgency");
-        const char *ast  = ftpk_get_metadata(meta, "Application", "autostart");
-        const char *o, *n, *ol, *nl, *odd, *ndd;
-
-        log_info("pending updates fetched (urgency: %s, start: %s)",
-                 urg ? urg : "<unknown>",
-                 ast ? ast : "<unknown>");
-
-        g_object_get(app->app, "latest-commit", &o, NULL);
-        ol = flatpak_installed_ref_get_latest_commit(app->app);
-        g_object_get(app->app, "deploy-dir", &odd, NULL);
-        g_object_get(u, "latest-commit", &n, NULL);
-        nl = flatpak_installed_ref_get_latest_commit(u);
-        g_object_get(u, "deploy-dir", &ndd, NULL);
-
-        log_info("%s/%s updated (from %s/%s@%s to %s/%s@%s)", app->origin, name,
-                 o, ol, odd, n, nl, ndd);
-
-    }
-    else
+    if (u == NULL && e->code != 0)
         goto fetch_failed;
+
+    if (u == app->app || u == NULL)
+        log_info("no pending updates");
+    else {
+        /*
+         * Unfortunately libflatpak seems to have a bug related to updates
+         * which are fetched with the NO_DEPLOY flag. While the updated
+         * FlatpakInstalledRef has correct commit info, its deploy-dir
+         * still points to the old, currently active one. This prevents us
+         * from easily (IOW using stock flatpak functions) getting to the
+         * metadata of the freshly downloaded HEAD.
+         *
+         * In practice this means that we cannot check our extra set of
+         * metadata (for instance urgency) without applying the updates
+         * first...
+         */
+        log_info("updates for %s/%s fetched succesfully", origin, name);
+    }
 
     return 0;
 
  fetch_failed:
-    log_error("failed to fetch updates (%s: %d:%s)",
+    log_error("failed to fetch updates (%s: %d: %s)",
               g_quark_to_string(e->domain), e->code, e->message);
     return -1;
 }
 
 
-int ftpk_update_cached(flatpak_t *f, application_t *app)
+int ftpk_apply_updates(flatpak_t *f, application_t *app)
 {
     const char          *origin = app->origin;
     const char          *name   = app->name;
@@ -499,7 +499,7 @@ int ftpk_update_cached(flatpak_t *f, application_t *app)
     GError              *e      = NULL;
     FlatpakInstalledRef *u;
 
-    log_info("applying cached updates to application %s/%s...", origin, name);
+    log_info("applying pending updates for application %s/%s...", origin, name);
 
     if (f->dry_run)
         return 0;
@@ -507,29 +507,89 @@ int ftpk_update_cached(flatpak_t *f, application_t *app)
     u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
                                     update_progress_cb, app, NULL, &e);
 
-    if (u == app->app || (u == NULL && e->code == 0))
-        log_info("%s/%s is already up-to-date", app->origin, name);
-    else if (u != NULL) {
-        const char *o, *n, *ol, *nl;
-        g_object_get(app->app, "latest-commit", &o, NULL);
-        ol = flatpak_installed_ref_get_latest_commit(app->app);
-        g_object_get(u, "latest-commit", &n, NULL);
-        nl = flatpak_installed_ref_get_latest_commit(u);
+    if (u == NULL && e->code != 0)
+        goto fetch_failed;
 
-        log_info("%s/%s updated (from %s/%s to %s/%s)", app->origin, name,
-                 o, ol, n, nl);
+    if (u == app->app || u == NULL)
+        log_info("no pending updates");
+    else {
+        log_info("updates for %s/%s applied succesfully", origin, name);
 
         g_object_unref(app->app);
         app->app = g_object_ref(u);
-        ftpk_load_metadata(app->app);
+
+        ftpk_free_metadata(app->metadata);
+        app->metadata = ftpk_load_metadata(app->app);
     }
-    else
+
+    return 0;
+
+ fetch_failed:
+    log_error("failed to fetch updates (%s: %d: %s)",
+              g_quark_to_string(e->domain), e->code, e->message);
+    return -1;
+}
+
+
+int ftpk_update_app(flatpak_t *f, application_t *app)
+{
+    const char          *origin = app->origin;
+    const char          *name   = app->name;
+    FlatpakRefKind       kind   = FLATPAK_REF_KIND_APP;
+    int                  flags  = FLATPAK_UPDATE_FLAGS_NONE;
+    GError              *e      = NULL;
+    FlatpakInstalledRef *u;
+
+    log_info("checking updates for application %s/%s...", origin, name);
+
+    if (f->dry_run)
+        return 0;
+
+    u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
+                                    update_progress_cb, app, NULL, &e);
+
+    if (u == NULL && e->code != 0)
         goto update_failed;
+
+    if (u == app->app || u == NULL)
+        log_info("%s/%s is already up-to-date", app->origin, name);
+    else {
+        log_info("%s/%s updated successfully.", app->origin, name);
+
+        g_object_unref(app->app);
+        app->app = g_object_ref(u);
+
+        ftpk_free_metadata(app->metadata);
+        app->metadata = ftpk_load_metadata(app->app);
+    }
 
     return 0;
 
  update_failed:
-    log_error("update failed (%s: %d:%s)",
+    log_error("update failed (%s: %d: %s)",
+              g_quark_to_string(e->domain), e->code, e->message);
+    return -1;
+}
+
+
+int ftpk_launch_app(flatpak_t *f, application_t *app)
+{
+    GError *e;
+
+    log_info("launching application %s/%s...", app->origin, app->name);
+
+    if (f->dry_run)
+        return 0;
+
+    e = NULL;
+    if (!flatpak_installation_launch(f->f, app->name, NULL, NULL, NULL,
+                                     NULL, &e))
+        goto launch_failed;
+
+    return 0;
+
+ launch_failed:
+    log_error("failed to launch application '%s' (%s: %d:%s).", app->name,
               g_quark_to_string(e->domain), e->code, e->message);
     return -1;
 }
@@ -556,26 +616,28 @@ static char *ftpk_scope(uid_t uid, pid_t session, const char *app,
 }
 
 
-int ftpk_launch_app(flatpak_t *f, application_t *app)
+static int check_pid_cb(pid_t pid, void *user_data)
 {
-    GError *e;
+    pid_t *pidp = user_data;
 
-    log_info("launching application %s/%s...", app->origin, app->name);
+    if (pid == *pidp)
+        return 1;
 
-    if (f->dry_run)
-        return 0;
-
-    e = NULL;
-    if (!flatpak_installation_launch(f->f, app->name, NULL, NULL, NULL,
-                                     NULL, &e))
-        goto launch_failed;
-
+    *pidp = pid;
     return 0;
+}
 
- launch_failed:
-    log_error("failed to launch application '%s' (%s: %d:%s).", app->name,
-              g_quark_to_string(e->domain), e->code, e->message);
-    return -1;
+
+pid_t ftpk_session_pid(uid_t uid)
+{
+    pid_t pid, own;
+
+    pid = own = getpid();
+
+    if (fs_scan_proc(FLATPAK_SESSION_PATH, uid, check_pid_cb, &pid) < 0)
+        return (pid_t)-1;
+
+    return pid != own ? pid : (pid_t)-1;
 }
 
 

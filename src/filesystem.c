@@ -28,6 +28,7 @@
  */
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
@@ -267,4 +268,63 @@ char *fsys_service_link(flatpak_t *f, const char *usr, char *path, size_t size)
  overflow:
     errno = EOVERFLOW;
     return NULL;
+}
+
+
+int fs_scan_proc(const char *exe, uid_t uid,
+                 int (*cb)(pid_t pid, void *user_data), void *user_data)
+{
+    DIR           *dp;
+    struct dirent *de;
+    struct stat    st;
+    char           file[PATH_MAX], *bin;
+    int            status;
+
+    if ((dp = opendir("/proc")) == NULL)
+        return -1;
+
+    while ((de = readdir(dp)) != NULL) {
+        if (!('0' <= de->d_name[0] && de->d_name[0] <= '9'))
+            continue;
+
+        snprintf(file, sizeof(file), "/proc/%s/exe", de->d_name);
+
+        if (lstat(file, &st) != 0)
+            continue;
+
+        if (uid != (uid_t)-1 && st.st_uid != uid)
+            continue;
+
+        if (readlink(file, file, sizeof(file)) != 0)
+            continue;
+
+        if (exe[0] == '/') {
+            bin = file;
+        }
+        else {
+            if ((bin = strrchr(file, '/')) != NULL)
+                bin++;
+            else
+                bin = file;
+        }
+
+        if (!strcmp(exe, bin)) {
+            status = cb((pid_t)strtoul(de->d_name, NULL, 10), user_data);
+
+            if (status == 0)
+                break;
+
+            if (status < 0)
+                goto fail;
+        }
+    }
+
+    closedir(dp);
+
+    return 0;
+
+ fail:
+    closedir(dp);
+
+    return -1;
 }

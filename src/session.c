@@ -89,7 +89,7 @@ int session_start(flatpak_t *f)
 }
 
 
-int session_stop(flatpak_t *f)
+int session_stop(flatpak_t *f, uid_t uid)
 {
     UNUSED_ARG(f);
 

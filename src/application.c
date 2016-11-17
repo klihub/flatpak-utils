@@ -103,7 +103,7 @@ int app_fetch_updates(flatpak_t *f, application_t *app)
 
 int app_update_cached(flatpak_t *f, application_t *app)
 {
-    return ftpk_update_cached(f, app);
+    return ftpk_apply_updates(f, app);
 }
 
 
@@ -135,7 +135,7 @@ int app_update(flatpak_t *f)
 
     g_hash_table_iter_init(&it, f->apps);
     while (g_hash_table_iter_next(&it, NULL, (void **)&app)) {
-        if (ftpk_update_cached(f, app) < 0)
+        if (ftpk_apply_updates(f, app) < 0)
             status = -1;
     }
 
