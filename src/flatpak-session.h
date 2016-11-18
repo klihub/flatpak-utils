@@ -95,6 +95,7 @@ typedef enum {
     COMMAND_GENERATE,                    /* generate a systemd session */
     COMMAND_START,                       /* start flatpaks for a session */
     COMMAND_STOP,                        /* stop flatpaks for a session */
+    COMMAND_SIGNAL,                      /* signal a flatpak session */
     COMMAND_FETCH,                       /* fetch updates from remotes */
     COMMAND_APPLY,                       /* update flatpaks from local cache */
     COMMAND_UPDATE,                      /* fetch updates and apply them */
@@ -117,6 +118,7 @@ struct flatpak_s {
     const char          *argv0;          /* us... */
     const char          *dir_service;    /* systemd generator service dir. */
     uid_t                user;           /* user id to stop session for */
+    int                  sig;            /* signal to send to a session */
     command_t            command;        /* action to perform */
     char               **chosen;         /* remotes given on commandline */
     int                  nchosen;        /* number of chosen remotes */
@@ -215,7 +217,8 @@ int app_update(flatpak_t *f);
 /* session.c */
 int session_enable(flatpak_t *f);
 int session_start(flatpak_t *f);
-int session_stop(flatpak_t *f, uid_t uid);
+int session_stop(flatpak_t *f);
+int session_signal(flatpak_t *f);
 
 /* filesystem.c */
 int fsys_prepare_sessions(flatpak_t *f);

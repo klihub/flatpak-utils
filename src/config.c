@@ -196,10 +196,16 @@ static void parse_command(flatpak_t *f, int argc, char **argv)
 
     command = argv[optind];
 
-    if (!strcmp(command, "enable") || !strcmp(command, "generate"))
+    if (!strcmp(command, "list"))
+        f->command = COMMAND_LIST;
+    else if (!strcmp(command, "enable") || !strcmp(command, "generate"))
         f->command = COMMAND_GENERATE;
     else if (!strcmp(command, "start"))
         f->command = COMMAND_START;
+    else if (!strcmp(optarg, "stop"))
+        f->command = COMMAND_STOP;
+    else if (!strcmp(optarg, "signal"))
+        f->command = COMMAND_SIGNAL;
     else if (!strcmp(optarg, "fetch"))
         f->command = COMMAND_FETCH;
     else if (!strcmp(optarg, "update"))
@@ -261,6 +267,105 @@ static void parse_start_options(flatpak_t *f, int argc, char **argv)
 
         case '?':
             print_usage(argv[0], EINVAL, "invalid start option");
+            break;
+        }
+    }
+#   undef OPTIONS
+}
+
+
+static void parse_stop_options(flatpak_t *f, int argc, char **argv)
+{
+#   define OPTIONS "r:s:"
+    static struct option options[] = {
+        { "remote", required_argument, NULL, 'r' },
+        { NULL, 0, NULL, 0 },
+    };
+
+    int opt;
+
+    f->user = geteuid();
+
+    if (optind >= argc)
+        return;
+
+    while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
+        switch (opt) {
+        case 'r':
+            f->user = remote_resolve_user(optarg, NULL, 0);
+
+            if (f->user == (uid_t)-1)
+                print_usage(argv[0], EINVAL, "no user for remote '%s'", optarg);
+            break;
+
+        case '?':
+            print_usage(argv[0], EINVAL, "invalid stop option '%c'", opt);
+            break;
+        }
+    }
+#   undef OPTIONS
+}
+
+
+static void parse_signal_name(flatpak_t *f, const char *signame)
+{
+    const char *p = signame;
+    char       *e;
+
+    if (!strncmp(p, "SIG", 3))
+        p += 3;
+
+    if (!strcmp(p, "HUP"))
+        f->sig = SIGHUP;
+    else if (!strcmp(p, "TERM"))
+        f->sig = SIGTERM;
+    else if (!strcmp(p, "KILL"))
+        f->sig = SIGKILL;
+    else {
+        f->sig = strtol(signame, &e, 10);
+
+        if (e && *e)
+            print_usage(f->argv0, EINVAL,
+                        "invalid/unsupported signal name/number '%s'", signame);
+
+        if (f->sig < 0)
+            f->sig = -f->sig;
+    }
+}
+
+
+static void parse_signal_options(flatpak_t *f, int argc, char **argv)
+{
+#   define OPTIONS "r:s:"
+    static struct option options[] = {
+        { "remote", required_argument, NULL, 'r' },
+        { "signal", required_argument, NULL, 's' },
+        { NULL, 0, NULL, 0 },
+    };
+
+    int opt;
+
+    f->user = geteuid();
+    f->sig  = SIGTERM;
+
+    if (optind >= argc)
+        return;
+
+    while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
+        switch (opt) {
+        case 'r':
+            f->user = remote_resolve_user(optarg, NULL, 0);
+
+            if (f->user == (uid_t)-1)
+                print_usage(argv[0], EINVAL, "no user for remote '%s'", optarg);
+            break;
+
+        case 's':
+            parse_signal_name(f, optarg);
+            break;
+
+        case '?':
+            print_usage(argv[0], EINVAL, "invalid signal option '%c'", opt);
             break;
         }
     }
@@ -346,6 +451,12 @@ void config_parse_cmdline(flatpak_t *f, int argc, char **argv)
         break;
     case COMMAND_START:
         parse_start_options(f, argc, argv);
+        break;
+    case COMMAND_STOP:
+        parse_stop_options(f, argc, argv);
+        break;
+    case COMMAND_SIGNAL:
+        parse_signal_options(f, argc, argv);
         break;
     case COMMAND_UPDATE:
         parse_update_options(f, argc, argv);

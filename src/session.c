@@ -89,9 +89,23 @@ int session_start(flatpak_t *f)
 }
 
 
-int session_stop(flatpak_t *f, uid_t uid)
+int session_stop(flatpak_t *f)
 {
-    UNUSED_ARG(f);
+    log_info("stopping session for remote %d...", f->user);
+
+    if (f->dry_run)
+        return 0;
+
+    return 0;
+}
+
+
+int session_signal(flatpak_t *f)
+{
+    log_info("sending signal #%d to session for remote %d...", f->sig, f->user);
+
+    if (f->dry_run)
+        return 0;
 
     return 0;
 }

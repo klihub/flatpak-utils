@@ -650,7 +650,8 @@ int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
     FILE *fp;
     int   n, status;
 
-    UNUSED_ARG(f);
+    if (session == (pid_t)-1)
+        session = getpid();
 
     n = snprintf(tasks, sizeof(tasks), "%s/tasks",
                  ftpk_scope(uid, session, app->name, scope, sizeof(scope)));
@@ -680,8 +681,9 @@ int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
         log_info("Sending process %u (%s) signal %d (%s)...",
                  pid, exe, sig, strsignal(sig));
 
-        if (kill(pid, sig) < 0)
-            status = -1;
+        if (!f->dry_run)
+            if (kill(pid, sig) < 0)
+                status = -1;
     }
 
     fclose(fp);

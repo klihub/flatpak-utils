@@ -50,6 +50,16 @@ static int generate_sessions(flatpak_t *f)
 }
 
 
+int list_sessions(flatpak_t *f)
+{
+    UNUSED_ARG(f);
+
+    log_info("should list remotes/sessions...");
+
+    return 0;
+}
+
+
 static int start_session(flatpak_t *f)
 {
     log_info("starting flatpak session for user %d", geteuid());
@@ -66,7 +76,15 @@ static int start_session(flatpak_t *f)
 
 static int stop_session(flatpak_t *f)
 {
-    log_info("stopping flatpak session for user %d", f->user);
+    session_stop(f);
+
+    return 0;
+}
+
+
+static int signal_session(flatpak_t *f)
+{
+    session_signal(f);
 
     return 0;
 }
@@ -193,13 +211,21 @@ static void setup_monitor(flatpak_t *f)
 }
 
 
+static inline int needs_mainloop(flatpak_t *f)
+{
+    return (f->poll_interval > 0 ||
+            f->command == COMMAND_START || f->command == COMMAND_STOP ||
+            f->command == COMMAND_SIGNAL);
+}
+
+
 int main(int argc, char **argv)
 {
     flatpak_t f;
 
     config_parse_cmdline(&f, argc, argv);
 
-    if (f.poll_interval > 0 || f.command == COMMAND_START) {
+    if (needs_mainloop(&f)) {
         mainloop_create(&f);
         setup_signals(&f);
 
@@ -209,8 +235,10 @@ int main(int argc, char **argv)
 
     switch (f.command) {
     case COMMAND_GENERATE: generate_sessions(&f); break;
+    case COMMAND_LIST:     list_sessions(&f);     break;
     case COMMAND_START:    start_session(&f);     break;
     case COMMAND_STOP:     stop_session(&f);      break;
+    case COMMAND_SIGNAL:   signal_session(&f);    break;
     case COMMAND_FETCH:    fetch_updates(&f);     break;
     case COMMAND_APPLY:    update_cached(&f);     break;
     case COMMAND_UPDATE:   fetch_and_update(&f);  break;
@@ -219,7 +247,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    if (f.poll_interval > 0 || f.command == COMMAND_START)
+    if (needs_mainloop(&f))
         mainloop_run(&f);
 
     return f.exit_code;
