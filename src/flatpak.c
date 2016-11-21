@@ -712,5 +712,7 @@ int ftpk_signal_session(uid_t uid, int sig)
     if ((pid = ftpk_session_pid(uid)) == 0)
         return -1;
 
+    printf("session pid is %d\n", pid);
+
     return kill(pid, sig);
 }
