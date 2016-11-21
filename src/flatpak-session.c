@@ -138,10 +138,12 @@ static int fetch_and_update(flatpak_t *f)
 
 static void sighandler(flatpak_t *f, int signum)
 {
+    /*
     if (f->command == COMMAND_START) {
         f->sig = signum;
         session_signal(f);
-    }
+        }
+    */
 
     switch (signum) {
     case SIGHUP:
