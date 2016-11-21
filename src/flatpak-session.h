@@ -216,6 +216,7 @@ int app_update(flatpak_t *f);
 
 /* session.c */
 int session_enable(flatpak_t *f);
+int session_list(flatpak_t *f);
 int session_start(flatpak_t *f);
 int session_stop(flatpak_t *f);
 int session_signal(flatpak_t *f);

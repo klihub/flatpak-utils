@@ -52,9 +52,10 @@ static int generate_sessions(flatpak_t *f)
 
 int list_sessions(flatpak_t *f)
 {
-    UNUSED_ARG(f);
+    if (app_discover(f) < 0)
+        return -1;
 
-    log_info("should list remotes/sessions...");
+    session_list(f);
 
     return 0;
 }

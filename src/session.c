@@ -27,6 +27,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <string.h>
+
 #include "flatpak-session.h"
 
 
@@ -70,6 +72,31 @@ int session_enable(flatpak_t *f)
     }
 
     return status;
+}
+
+
+int session_list(flatpak_t *f)
+{
+    remote_t       *r;
+    application_t  *app;
+    const char     *remote, *url, *user;
+    GHashTableIter  ri, ai;
+
+    g_hash_table_iter_init(&ri, f->remotes);
+    while (g_hash_table_iter_next(&ri, NULL, (void **)&r)) {
+        remote = r->name;
+        url    = flatpak_remote_get_url(r->r);
+        user   = remote_username(r, NULL, 0);
+        printf("remote %s (URL %s, user %d (%s)):\n", remote, url, r->uid, user);
+
+        g_hash_table_iter_init(&ai, f->apps);
+        while (g_hash_table_iter_next(&ai, NULL, (void **)&app)) {
+            if (!strcmp(app->origin, remote))
+                printf("    application %s\n", app->name);
+        }
+    }
+
+    return 0;
 }
 
 
