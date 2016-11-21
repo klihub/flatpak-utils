@@ -129,10 +129,23 @@ int session_stop(flatpak_t *f)
 
 int session_signal(flatpak_t *f)
 {
-    log_info("sending signal #%d to session for remote %d...", f->sig, f->user);
+    remote_t       *r = remote_for_user(f, geteuid());
+    application_t  *app;
+    GHashTableIter  it;
+    int             status;
+
+    log_info("sending signal #%d to session applications...", f->sig);
 
     if (f->dry_run)
         return 0;
 
-    return 0;
+    status = 0;
+    g_hash_table_iter_init(&it, f->apps);
+    while (g_hash_table_iter_next(&it, NULL, (void **)&app)) {
+        if (remote_lookup(f, app->origin) == r)
+            if (ftpk_signal_app(f, app, -1, 0, f->sig) < 0)
+                status = -1;
+    }
+
+    return status;
 }

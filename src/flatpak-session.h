@@ -196,6 +196,7 @@ int ftpk_update_app(flatpak_t *f, application_t *app);
 int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
                     int sig);
 int ftpk_stop_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session);
+int ftpk_signal_session(uid_t uid, int sig);
 GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r);
 void ftpk_free_metadata(GKeyFile *f);
 const char *ftpk_get_metadata(GKeyFile *f, const char *section, const char *key);

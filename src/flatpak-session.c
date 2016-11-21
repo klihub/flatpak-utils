@@ -85,7 +85,7 @@ static int stop_session(flatpak_t *f)
 
 static int signal_session(flatpak_t *f)
 {
-    session_signal(f);
+    ftpk_signal_session(f->user, f->sig);
 
     return 0;
 }
@@ -138,7 +138,8 @@ static int fetch_and_update(flatpak_t *f)
 
 static void sighandler(flatpak_t *f, int signum)
 {
-    UNUSED_ARG(f);
+    if (f->command == COMMAND_START)
+        session_signal(f);
 
     switch (signum) {
     case SIGHUP:

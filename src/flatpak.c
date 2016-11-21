@@ -602,7 +602,7 @@ static char *ftpk_scope(uid_t uid, pid_t session, const char *app,
 
     if (uid == (uid_t)-1)
         uid = geteuid();
-    if (session == (pid_t)-1)
+    if (session == 0)
         session = getpid();
 
     n = snprintf(buf, size,
@@ -635,9 +635,9 @@ pid_t ftpk_session_pid(uid_t uid)
     pid = own = getpid();
 
     if (fs_scan_proc(FLATPAK_SESSION_PATH, uid, check_pid_cb, &pid) < 0)
-        return (pid_t)-1;
+        return 0;
 
-    return pid != own ? pid : (pid_t)-1;
+    return pid != own ? pid : 0;
 }
 
 
@@ -650,7 +650,7 @@ int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
     FILE *fp;
     int   n, status;
 
-    if (session == (pid_t)-1)
+    if (session == 0)
         session = getpid();
 
     n = snprintf(tasks, sizeof(tasks), "%s/tasks",
@@ -702,4 +702,15 @@ int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
 int ftpk_stop_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session)
 {
     return ftpk_signal_app(f, app, uid, session, SIGTERM);
+}
+
+
+int ftpk_signal_session(uid_t uid, int sig)
+{
+    pid_t pid;
+
+    if ((pid = ftpk_session_pid(uid)) == 0)
+        return -1;
+
+    return kill(pid, sig);
 }
