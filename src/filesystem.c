@@ -291,14 +291,20 @@ int fs_scan_proc(const char *exe, uid_t uid,
 
         snprintf(file, sizeof(file), "/proc/%s/exe", de->d_name);
 
+        printf("checking %s...\n", file);
+
         if (lstat(file, &st) != 0)
             continue;
 
         if (uid != (uid_t)-1 && st.st_uid != uid)
             continue;
 
+        printf("user check ok\n");
+
         if (readlink(file, file, sizeof(file)) != 0)
             continue;
+
+        printf("exe points to %s...\n", file);
 
         if (exe[0] == '/') {
             bin = file;
@@ -322,6 +328,8 @@ int fs_scan_proc(const char *exe, uid_t uid,
     }
 
     closedir(dp);
+
+    printf("fs scan done\n");
 
     return 0;
 
