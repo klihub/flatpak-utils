@@ -316,8 +316,12 @@ int fs_scan_proc(const char *exe, uid_t uid,
                 bin = file;
         }
 
+        printf("exe: '%s', bin: '%s'\n", exe, bin);
+
         if (!strcmp(exe, bin)) {
             status = cb((pid_t)strtoul(de->d_name, NULL, 10), user_data);
+
+            printf("pid_check status for %s: %d\n", de->d_name, status);
 
             if (status == 0)
                 break;
