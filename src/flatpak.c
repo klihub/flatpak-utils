@@ -667,8 +667,10 @@ int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
         pid = strtoul(task, NULL, 10);
         snprintf(lnk, sizeof(lnk), "/proc/%u/exe", (unsigned int)pid);
 
-        if (readlink(lnk, exe, sizeof(exe)) < 0)
+        if ((n = readlink(lnk, exe, sizeof(exe))) < 0)
             continue;
+
+        exe[n] = '\0';
 
         if ((base = strrchr(exe, '/')) != NULL)
             base++;
