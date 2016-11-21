@@ -278,7 +278,7 @@ int fs_scan_proc(const char *exe, uid_t uid,
     struct dirent *de;
     struct stat    st;
     char           file[PATH_MAX], *bin;
-    int            status;
+    int            n, status;
 
     if ((dp = opendir("/proc")) == NULL)
         return -1;
@@ -301,8 +301,10 @@ int fs_scan_proc(const char *exe, uid_t uid,
 
         printf("user check ok\n");
 
-        if (readlink(file, file, sizeof(file)) != 0)
+        if ((n = readlink(file, file, sizeof(file))) < 0)
             continue;
+
+        file[n] = '\0';
 
         printf("exe points to %s...\n", file);
 
