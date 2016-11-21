@@ -109,6 +109,7 @@ struct flatpak_s {
     GHashTable          *apps;           /* installed applications */
     GMainLoop           *loop;           /* main loop */
     void               (*sighandler)(flatpak_t *f, int sig);
+    sigset_t             blocked;        /* signals we block */
     int                  sfd;            /* signalfd */
     GIOChannel          *sio;            /* GIOChannel for our signalfd */
     guint                sid;            /* GIOChannel watch source id */

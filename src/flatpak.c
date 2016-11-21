@@ -575,6 +575,7 @@ int ftpk_update_app(flatpak_t *f, application_t *app)
 int ftpk_launch_app(flatpak_t *f, application_t *app)
 {
     GError *e;
+    int     s;
 
     log_info("launching application %s/%s...", app->origin, app->name);
 
@@ -582,8 +583,11 @@ int ftpk_launch_app(flatpak_t *f, application_t *app)
         return 0;
 
     e = NULL;
-    if (!flatpak_installation_launch(f->f, app->name, NULL, NULL, NULL,
-                                     NULL, &e))
+    sigprocmask(SIG_UNBLOCK, &f->blocked, NULL);
+    s = flatpak_installation_launch(f->f, app->name, NULL, NULL, NULL, NULL, &e);
+    sigprocmask(SIG_BLOCK, &f->blocked, NULL);
+
+    if (!s)
         goto launch_failed;
 
     return 0;

@@ -177,16 +177,14 @@ static void sighandler(flatpak_t *f, int signum)
 
 static void setup_signals(flatpak_t *f)
 {
-    sigset_t ss;
+    sigemptyset(&f->blocked);
+    sigaddset(&f->blocked, SIGHUP);
+    sigaddset(&f->blocked, SIGINT);
+    sigaddset(&f->blocked, SIGQUIT);
+    sigaddset(&f->blocked, SIGTERM);
+    sigaddset(&f->blocked, SIGURG);
 
-    sigemptyset(&ss);
-    sigaddset(&ss, SIGHUP);
-    sigaddset(&ss, SIGINT);
-    sigaddset(&ss, SIGQUIT);
-    sigaddset(&ss, SIGTERM);
-    sigaddset(&ss, SIGURG);
-
-    mainloop_watch_signals(f, &ss, sighandler);
+    mainloop_watch_signals(f, &f->blocked, sighandler);
 }
 
 
