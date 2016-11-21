@@ -138,8 +138,10 @@ static int fetch_and_update(flatpak_t *f)
 
 static void sighandler(flatpak_t *f, int signum)
 {
-    if (f->command == COMMAND_START)
+    if (f->command == COMMAND_START) {
+        f->sig = signum;
         session_signal(f);
+    }
 
     switch (signum) {
     case SIGHUP:
@@ -200,6 +202,7 @@ static void monitor_cb(flatpak_t *f)
     case COMMAND_APPLY:  update_cached(f);     break;
     case COMMAND_UPDATE: fetch_and_update(f);  break;
     default:
+        printf("WTF ?\n");
         break;
     }
 
@@ -216,8 +219,7 @@ static void setup_monitor(flatpak_t *f)
 static inline int needs_mainloop(flatpak_t *f)
 {
     return (f->poll_interval > 0 ||
-            f->command == COMMAND_START || f->command == COMMAND_STOP ||
-            f->command == COMMAND_SIGNAL);
+            f->command == COMMAND_START || f->command == COMMAND_STOP);
 }
 
 
