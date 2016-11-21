@@ -200,7 +200,6 @@ static void monitor_cb(flatpak_t *f)
     case COMMAND_APPLY:  update_cached(f);     break;
     case COMMAND_UPDATE: fetch_and_update(f);  break;
     default:
-        printf("WTF ?\n");
         break;
     }
 
@@ -227,13 +226,8 @@ int main(int argc, char **argv)
 
     config_parse_cmdline(&f, argc, argv);
 
-    if (needs_mainloop(&f)) {
+    if (needs_mainloop(&f))
         mainloop_create(&f);
-        setup_signals(&f);
-
-        if (f.command != COMMAND_START)
-            setup_monitor(&f);
-    }
 
     switch (f.command) {
     case COMMAND_GENERATE: generate_sessions(&f); break;
@@ -249,8 +243,14 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    if (needs_mainloop(&f))
+    if (needs_mainloop(&f)) {
+        setup_signals(&f);
+
+        if (f.command != COMMAND_START)
+            setup_monitor(&f);
+
         mainloop_run(&f);
+    }
 
     return f.exit_code;
 }
