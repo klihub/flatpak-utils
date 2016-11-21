@@ -284,6 +284,8 @@ int fs_scan_proc(const char *exe, uid_t uid,
         return -1;
 
     while ((de = readdir(dp)) != NULL) {
+        printf("got dir entry '%s'...\n", de->d_name);
+
         if (!('0' <= de->d_name[0] && de->d_name[0] <= '9'))
             continue;
 
