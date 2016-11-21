@@ -709,6 +709,8 @@ int ftpk_signal_session(uid_t uid, int sig)
 {
     pid_t pid;
 
+    log_info("sending signal #%d to session for user %d...", sig, uid);
+
     if ((pid = ftpk_session_pid(uid)) == 0)
         return -1;
 
