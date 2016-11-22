@@ -99,7 +99,7 @@ int ftpk_discover_remotes(flatpak_t *f)
     const char    *name;
     uid_t          uid;
     GError        *e;
-    int            i, j, match;
+    int            i;
 
     if (ftpk_init(f) < 0)
         return -1;
@@ -135,20 +135,6 @@ int ftpk_discover_remotes(flatpak_t *f)
 
         if ((uid = remote_resolve_user(name, NULL, 0)) == (uid_t)-1) {
             log_warning("remote %s: no associated user, ignoring...", name);
-            continue;
-        }
-
-        if (f->nchosen > 0) {
-            for (j = 0, match = 0; !match && j < (int)f->nchosen; j++) {
-                if (!strcmp(f->chosen[j], name))
-                    match = 1;
-            }
-        }
-        else
-            match = 1;
-
-        if (!match) {
-            log_warning("remote %s: not a selected remote, ignoring...", name);
             continue;
         }
 
@@ -272,113 +258,6 @@ application_t *ftpk_app(flatpak_t *f, const char *name)
     return f && f->apps ? g_hash_table_lookup(f->apps, name) : NULL;
 }
 
-
-#if 0
-int ftpk_discover_remotes(flatpak_t *f)
-{
-    FlatpakRemote *r;
-    GPtrArray     *remotes;
-    const char    *name;
-    GError        *e;
-    int            i, j, match;
-
-    if (ftpk_init(f) < 0)
-        goto fail;
-
-    e       = NULL;
-    remotes = flatpak_installation_list_remotes(f->f, NULL, &e);
-
-    if (remotes == NULL)
-        goto query_failed;
-
-    for (i = 0; i < (int)remotes->len; i++) {
-        r    = g_ptr_array_index(remotes, i);
-        name = flatpak_remote_get_name(r);
-
-        log_info("discovered remote '%s' (%s)", name, flatpak_remote_get_url(r));
-
-        if (flatpak_remote_get_disabled(r)) {
-            log_warning("    is disabled, skipping...");
-            goto discard;
-        }
-
-        if (!flatpak_remote_get_gpg_verify(r)) {
-            log_warning("    can't be GPG-verified%s...",
-                        f->gpg_verify ? ", skipping" : "");
-            if (f->gpg_verify)
-                goto discard;
-        }
-
-        for (j = 0, match = 0; !match && j < (int)f->nchosen; j++) {
-            if (!strcmp(f->chosen[j], name))
-                match = 1;
-        }
-
-        if (!match && f->chosen != NULL) {
-            log_warning("    not selected, skipping...");
-
-        discard:
-            g_ptr_array_remove_index_fast(remotes, (guint)i);
-            i--;
-        }
-    }
-
-    f->f_remotes = remotes;
-    return 0;
-
- query_failed:
-    log_error("failed to query remotes (%s: %d:%s)",
-              g_quark_to_string(e->domain), e->code, e->message);
- fail:
-    return -1;
-}
-
-
-int ftpk_discover_apps(flatpak_t *f)
-{
-    FlatpakInstalledRef *a;
-    FlatpakRefKind       knd;
-    remote_t            *r;
-    const char          *o;
-    GPtrArray           *apps;
-    GError              *e;
-    int                  i;
-
-    if (ftpk_init(f) < 0)
-        goto fail;
-
-    knd  = FLATPAK_REF_KIND_APP;
-    e    = NULL;
-    apps = flatpak_installation_list_installed_refs_by_kind(f->f, knd, NULL, &e);
-
-    if (apps == NULL)
-        goto query_failed;
-
-    for (i = 0; i < (int)apps->len; i++) {
-        a = g_ptr_array_index(apps, i);
-        o = flatpak_installed_ref_get_origin(a);
-        r = remote_lookup(f, o);
-
-        if (r == NULL) {
-            log_warning("ignoring app without associated session remote...");
-            g_ptr_array_remove_index_fast(apps, (guint)i);
-            i--;
-            continue;
-        }
-    }
-
-    f->f_apps = apps;
-    return 0;
-
- query_failed:
-    log_warning("failed to query installed apps (%s: %d:%s)",
-                g_quark_to_string(e->domain), e->code, e->message);
-
- fail:
-    return -1;
-}
-
-#endif
 
 GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r)
 {

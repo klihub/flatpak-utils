@@ -109,14 +109,12 @@ int app_update_cached(flatpak_t *f, application_t *app)
 
 int app_fetch(flatpak_t *f)
 {
-    application_t  *app;
-    GHashTableIter  it;
-    int             status;
+    application_t *app;
+    int            status;
 
     status = 0;
 
-    g_hash_table_iter_init(&it, f->apps);
-    while (g_hash_table_iter_next(&it, NULL, (void **)&app)) {
+    foreach_app(f, app) {
         if (ftpk_fetch_updates(f, app) < 0)
             status = -1;
     }
@@ -127,14 +125,12 @@ int app_fetch(flatpak_t *f)
 
 int app_update(flatpak_t *f)
 {
-    application_t  *app;
-    GHashTableIter  it;
-    int             status;
+    application_t *app;
+    int            status;
 
     status = 0;
 
-    g_hash_table_iter_init(&it, f->apps);
-    while (g_hash_table_iter_next(&it, NULL, (void **)&app)) {
+    foreach_app(f, app) {
         if (ftpk_apply_updates(f, app) < 0)
             status = -1;
     }

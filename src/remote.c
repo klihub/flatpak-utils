@@ -104,11 +104,9 @@ remote_t *remote_lookup(flatpak_t *f, const char *name)
 
 remote_t *remote_for_user(flatpak_t *f, uid_t uid)
 {
-    GHashTableIter  it;
-    remote_t       *r;
+    remote_t *r;
 
-    g_hash_table_iter_init(&it, f->remotes);
-    while (g_hash_table_iter_next(&it, NULL, (void **)&r)) {
+    foreach_remote(f, r) {
         if (r->uid == uid)
             return r;
     }

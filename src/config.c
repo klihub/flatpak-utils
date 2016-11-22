@@ -148,11 +148,9 @@ static void parse_common_options(flatpak_t *f, int argc, char **argv)
         { NULL, 0, NULL, 0 }
     };
 
-    const char *command = NULL;
-    int         opt;
+    int opt;
 
-    while (command == NULL &&
-           (opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
         switch (opt) {
         case 'u':
             f->gpg_verify = 0;
@@ -163,6 +161,7 @@ static void parse_common_options(flatpak_t *f, int argc, char **argv)
             break;
 
         case 'v':
+        case 'd':
             log_mask <<= 1;
             log_mask  |= 1;
             break;
@@ -171,9 +170,8 @@ static void parse_common_options(flatpak_t *f, int argc, char **argv)
             print_usage(argv[0], 0, "");
 
         case 1:
-            optind--;
-            command = optarg;
-            break;
+            optind--; /* we'll need to rescan it as a command argument */
+            return;
 
         case '?':
             print_usage(argv[0], EINVAL, "invalid option");
@@ -196,28 +194,21 @@ static void parse_command(flatpak_t *f, int argc, char **argv)
 
     command = argv[optind];
 
-    if (!strcmp(command, "list"))
-        f->command = COMMAND_LIST;
-    else if (!strcmp(command, "enable") || !strcmp(command, "generate"))
-        f->command = COMMAND_GENERATE;
-    else if (!strcmp(command, "start"))
-        f->command = COMMAND_START;
-    else if (!strcmp(optarg, "stop"))
-        f->command = COMMAND_STOP;
-    else if (!strcmp(optarg, "signal"))
-        f->command = COMMAND_SIGNAL;
-    else if (!strcmp(optarg, "fetch"))
-        f->command = COMMAND_FETCH;
-    else if (!strcmp(optarg, "update"))
-        f->command = COMMAND_UPDATE;
+    if      (!strcmp(command, "list"))   f->command = COMMAND_LIST;
+    else if (!strcmp(command, "enable")) f->command = COMMAND_GENERATE;
+    else if (!strcmp(command, "start"))  f->command = COMMAND_START;
+    else if (!strcmp(command, "stop"))   f->command = COMMAND_STOP;
+    else if (!strcmp(command, "signal")) f->command = COMMAND_SIGNAL;
+    else if (!strcmp(command, "fetch"))  f->command = COMMAND_FETCH;
+    else if (!strcmp(command, "update")) f->command = COMMAND_UPDATE;
     else
-        print_usage(argv[0], EINVAL, "invalid command '%s'", optarg);
+        print_usage(argv[0], EINVAL, "unknown command '%s'", optarg);
 
     optind++;
 }
 
 
-static void parse_enable_options(flatpak_t *f, int argc, char **argv)
+static void parse_generate_options(flatpak_t *f, int argc, char **argv)
 {
     if (optind + 2 > argc - 1)
         print_usage(argv[0], EINVAL,
@@ -233,10 +224,9 @@ static void parse_enable_options(flatpak_t *f, int argc, char **argv)
     f->dir_service = argv[optind];
     optind += 3;
 
-    if (optind <= argc - 1) {
-        f->chosen  = argv + optind;
-        f->nchosen = argc - optind;
-    }
+    if (optind <= argc - 1)
+        print_usage(argv[0], EINVAL,
+                    "unknown options starting at '%s'", argv[optind]);
 }
 
 
@@ -274,6 +264,15 @@ static void parse_start_options(flatpak_t *f, int argc, char **argv)
 }
 
 
+static void parse_remote(flatpak_t *f, const char *remote)
+{
+    f->uid = remote_resolve_user(remote, NULL, 0);
+
+    if (f->uid == (uid_t)-1)
+        print_usage(f->argv0, EINVAL, "no user for remote '%s'", remote);
+}
+
+
 static void parse_stop_options(flatpak_t *f, int argc, char **argv)
 {
 #   define OPTIONS "r:s:"
@@ -284,7 +283,7 @@ static void parse_stop_options(flatpak_t *f, int argc, char **argv)
 
     int opt;
 
-    f->user = geteuid();
+    f->uid = geteuid();
 
     if (optind >= argc)
         return;
@@ -292,10 +291,7 @@ static void parse_stop_options(flatpak_t *f, int argc, char **argv)
     while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
         switch (opt) {
         case 'r':
-            f->user = remote_resolve_user(optarg, NULL, 0);
-
-            if (f->user == (uid_t)-1)
-                print_usage(argv[0], EINVAL, "no user for remote '%s'", optarg);
+            parse_remote(f, optarg);
             break;
 
         case '?':
@@ -345,8 +341,8 @@ static void parse_signal_options(flatpak_t *f, int argc, char **argv)
 
     int opt;
 
-    f->user = geteuid();
-    f->sig  = SIGTERM;
+    f->uid = geteuid();
+    f->sig = SIGTERM;
 
     if (optind >= argc)
         return;
@@ -354,10 +350,7 @@ static void parse_signal_options(flatpak_t *f, int argc, char **argv)
     while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
         switch (opt) {
         case 'r':
-            f->user = remote_resolve_user(optarg, NULL, 0);
-
-            if (f->user == (uid_t)-1)
-                print_usage(argv[0], EINVAL, "no user for remote '%s'", optarg);
+            parse_remote(f, optarg);
             break;
 
         case 's':
@@ -375,7 +368,7 @@ static void parse_signal_options(flatpak_t *f, int argc, char **argv)
 
 static void parse_update_options(flatpak_t *f, int argc, char **argv)
 {
-#   define OPTIONS "-flmi:"
+#   define OPTIONS "flmi:"
     static struct option options[] = {
         { "fetch"        , no_argument      , NULL, 'f' },
         { "local"        , no_argument      , NULL, 'l' },
@@ -390,11 +383,6 @@ static void parse_update_options(flatpak_t *f, int argc, char **argv)
         return;
 
     while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
-        if (f->chosen != NULL && opt != 1) {
-            print_usage(argv[0], EINVAL,
-                        "can't mix options with remote selectors");
-        }
-
         switch (opt) {
         case 'f':
             if (f->command == COMMAND_UPDATE)
@@ -419,13 +407,6 @@ static void parse_update_options(flatpak_t *f, int argc, char **argv)
             parse_interval(f, optarg);
             break;
 
-        case 1:
-            if (f->chosen == NULL) {
-                f->chosen  = argv + optind - 1;
-                f->nchosen = argc - optind + 1;
-            }
-            break;
-
         case '?':
             print_usage(argv[0], EINVAL, "invalid update option");
             break;
@@ -447,7 +428,7 @@ void config_parse_cmdline(flatpak_t *f, int argc, char **argv)
 
     switch (f->command) {
     case COMMAND_GENERATE:
-        parse_enable_options(f, argc, argv);
+        parse_generate_options(f, argc, argv);
         break;
     case COMMAND_START:
         parse_start_options(f, argc, argv);
@@ -463,16 +444,6 @@ void config_parse_cmdline(flatpak_t *f, int argc, char **argv)
         break;
     default:
         break;
-    }
-
-    if (f->chosen != NULL) {
-        int i;
-
-        for (i = 0; i < f->nchosen; i++) {
-            if (f->chosen[i][0] == '-')
-                print_usage(argv[0], EINVAL,
-                            "can't mix options with remote selectors");
-        }
     }
 
     log_open(f);

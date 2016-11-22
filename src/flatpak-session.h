@@ -81,8 +81,9 @@
 #    define FLATPAK_GECOS_PREFIX "flatpak user for "
 #endif
 
-#define FLATPAK_POLL_MIN_INTERVAL /*(5 * 60)*/ 15
-
+#ifndef FLATPAK_POLL_MIN_INTERVAL
+#    define FLATPAK_POLL_MIN_INTERVAL /*(5 * 60)*/ 15
+#endif
 
 /* mark unused arguments and silence the compiler about them */
 #define UNUSED_ARG(arg) (void)arg
@@ -103,6 +104,7 @@ typedef enum {
 
 /* runtime context */
 typedef struct flatpak_s flatpak_t;
+
 struct flatpak_s {
     FlatpakInstallation *f;              /* flatpak context */
     GHashTable          *remotes;        /* remotes for applications */
@@ -116,13 +118,12 @@ struct flatpak_s {
     void               (*monitor)(flatpak_t *f);
     guint                mid;            /* monitoring timer source id */
     int                  exit_code;      /* exit code to exit with */
+    /* things coming from command line/configuration */
     const char          *argv0;          /* us... */
     const char          *dir_service;    /* systemd generator service dir. */
-    uid_t                user;           /* user id to stop session for */
+    uid_t                uid;            /* user id to stop session for */
     int                  sig;            /* signal to send to a session */
     command_t            command;        /* action to perform */
-    char               **chosen;         /* remotes given on commandline */
-    int                  nchosen;        /* number of chosen remotes */
     int                  restart_status; /* exit status for forced restart */
     int                  poll_interval;  /* update polling interval */
     int                  dry_run : 1;    /* don't perform, just show actions */
@@ -209,12 +210,22 @@ remote_t *remote_lookup(flatpak_t *f, const char *name);
 const char *remote_username(remote_t *r, char *buf, size_t size);
 remote_t *remote_for_user(flatpak_t *f, uid_t uid);
 
+#define foreach_remote(_f, _r)                                          \
+    GHashTableIter _r##_it;                                             \
+    g_hash_table_iter_init(&_r##_it, _f->remotes);                      \
+    while (g_hash_table_iter_next(&_r##_it, NULL, (void **)&_r))
+
 /* application.c */
 int app_discover(flatpak_t *f);
 int app_fetch_updates(flatpak_t *f, application_t *app);
 int app_update_cached(flatpak_t *f, application_t *app);
 int app_fetch(flatpak_t *f);
 int app_update(flatpak_t *f);
+
+#define foreach_app(_f, _a)                                             \
+    GHashTableIter _a##_it;                                             \
+    g_hash_table_iter_init(&_a##_it, _f->apps);                         \
+    while (g_hash_table_iter_next(&_a##_it, NULL, (void **)&_a))
 
 /* session.c */
 int session_enable(flatpak_t *f);

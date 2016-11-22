@@ -50,7 +50,7 @@ static int generate_sessions(flatpak_t *f)
 }
 
 
-int list_sessions(flatpak_t *f)
+static int list_sessions(flatpak_t *f)
 {
     if (app_discover(f) < 0)
         return -1;
@@ -85,7 +85,7 @@ static int stop_session(flatpak_t *f)
 
 static int signal_session(flatpak_t *f)
 {
-    ftpk_signal_session(f->user, f->sig);
+    ftpk_signal_session(f->uid, f->sig);
 
     return 0;
 }
