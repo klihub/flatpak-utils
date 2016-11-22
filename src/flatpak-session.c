@@ -38,8 +38,6 @@ static void setup_signals(flatpak_t *f);
 
 static int generate_sessions(flatpak_t *f)
 {
-    log_info("generating flatpak sessions...");
-
     if (remote_discover(f) < 0)
         return -1;
 
@@ -63,8 +61,6 @@ static int list_sessions(flatpak_t *f)
 
 static int start_session(flatpak_t *f)
 {
-    log_info("starting flatpak session for user %d", geteuid());
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -77,7 +73,11 @@ static int start_session(flatpak_t *f)
 
 static int stop_session(flatpak_t *f)
 {
-    session_stop(f);
+    if (app_discover(f) < 0)
+        return -1;
+
+    if (session_stop(f) < 0)
+        return -1;
 
     return 0;
 }
@@ -85,7 +85,11 @@ static int stop_session(flatpak_t *f)
 
 static int signal_session(flatpak_t *f)
 {
-    ftpk_signal_session(f->uid, f->sig);
+    if (app_discover(f) < 0)
+        return -1;
+
+    if (session_signal(f) < 0)
+        return -1;
 
     return 0;
 }
@@ -93,8 +97,6 @@ static int signal_session(flatpak_t *f)
 
 static int fetch_updates(flatpak_t *f)
 {
-    log_info("fetching updates...");
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -107,8 +109,6 @@ static int fetch_updates(flatpak_t *f)
 
 static int update_cached(flatpak_t *f)
 {
-    log_info("applying cached updates...");
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -121,8 +121,6 @@ static int update_cached(flatpak_t *f)
 
 static int fetch_and_update(flatpak_t *f)
 {
-    log_info("fetching updates and updating applications...");
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -138,12 +136,10 @@ static int fetch_and_update(flatpak_t *f)
 
 static void sighandler(flatpak_t *f, int signum)
 {
-    /*
     if (f->command == COMMAND_START) {
         f->sig = signum;
         session_signal(f);
-        }
-    */
+    }
 
     switch (signum) {
     case SIGHUP:

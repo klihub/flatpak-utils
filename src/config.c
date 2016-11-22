@@ -241,6 +241,8 @@ static void parse_start_options(flatpak_t *f, int argc, char **argv)
     int   opt;
     char *e;
 
+    f->uid = geteuid();
+
     if (optind >= argc)
         return;
 
@@ -273,36 +275,6 @@ static void parse_remote(flatpak_t *f, const char *remote)
 }
 
 
-static void parse_stop_options(flatpak_t *f, int argc, char **argv)
-{
-#   define OPTIONS "r:s:"
-    static struct option options[] = {
-        { "remote", required_argument, NULL, 'r' },
-        { NULL, 0, NULL, 0 },
-    };
-
-    int opt;
-
-    f->uid = geteuid();
-
-    if (optind >= argc)
-        return;
-
-    while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
-        switch (opt) {
-        case 'r':
-            parse_remote(f, optarg);
-            break;
-
-        case '?':
-            print_usage(argv[0], EINVAL, "invalid stop option '%c'", opt);
-            break;
-        }
-    }
-#   undef OPTIONS
-}
-
-
 static void parse_signal_name(flatpak_t *f, const char *signame)
 {
     const char *p = signame;
@@ -327,6 +299,41 @@ static void parse_signal_name(flatpak_t *f, const char *signame)
         if (f->sig < 0)
             f->sig = -f->sig;
     }
+}
+
+
+static void parse_stop_options(flatpak_t *f, int argc, char **argv)
+{
+#   define OPTIONS "r:s:"
+    static struct option options[] = {
+        { "remote", required_argument, NULL, 'r' },
+        { "signal", required_argument, NULL, 's' },
+        { NULL, 0, NULL, 0 },
+    };
+
+    int opt;
+
+    f->uid = geteuid();
+
+    if (optind >= argc)
+        return;
+
+    while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
+        switch (opt) {
+        case 'r':
+            parse_remote(f, optarg);
+            break;
+
+        case 's':
+            parse_signal_name(f, optarg);
+            break;
+
+        case '?':
+            print_usage(argv[0], EINVAL, "invalid stop option '%c'", opt);
+            break;
+        }
+    }
+#   undef OPTIONS
 }
 
 

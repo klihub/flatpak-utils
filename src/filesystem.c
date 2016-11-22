@@ -42,7 +42,7 @@
 #include "flatpak-session.h"
 
 
-int fsys_prepare_sessions(flatpak_t *f)
+int fsys_prepare_session(flatpak_t *f)
 {
     char *dir = fsys_mkpath(NULL, 0, "%s/%s.wants",
                             f->dir_service, FLATPAK_TARGET);

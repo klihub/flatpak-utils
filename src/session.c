@@ -41,10 +41,10 @@ static int session_link(flatpak_t *f, remote_t *r)
         !fsys_service_link(f, usr, lnk, sizeof(lnk)))
         return -1;
 
-    log_info("linking session template %s to %s...", srv, lnk);
-
     if (!f->dry_run) {
         unlink(lnk);
+
+        log_info("linking %s to %s...", srv, lnk);
 
         if (symlink(srv, lnk) < 0)
             return -1;
@@ -59,12 +59,16 @@ int session_enable(flatpak_t *f)
     remote_t *r;
     int       status;
 
-    if (fsys_prepare_sessions(f) < 0)
+    log_info("generating flatpak application sessions...");
+
+    if (fsys_prepare_session(f) < 0)
         return -1;
 
     status = 0;
 
     foreach_remote(f, r) {
+        log_info("setting up session for remote %s...", r->name);
+
         if (session_link(f, r) < 0)
             status = -1;
     }
@@ -77,16 +81,16 @@ int session_list(flatpak_t *f)
 {
     remote_t      *r;
     application_t *app;
-    const char    *remote, *url, *user;
+    const char    *url, *usr;
 
     foreach_remote(f, r) {
-        remote = r->name;
-        url    = flatpak_remote_get_url(r->r);
-        user   = remote_username(r, NULL, 0);
-        printf("remote %s (URL %s, user %d (%s)):\n", remote, url, r->uid, user);
+        url = remote_url(r, NULL, 0);
+        usr = remote_username(r, NULL, 0);
+
+        printf("remote %s (%s, user %d (%s)):\n", r->name, url, r->uid, usr);
 
         foreach_app(f, app) {
-            if (!strcmp(app->origin, remote))
+            if (!strcmp(app->origin, r->name))
                 printf("    application %s\n", app->name);
         }
     }
@@ -97,11 +101,21 @@ int session_list(flatpak_t *f)
 
 int session_start(flatpak_t *f)
 {
-    remote_t       *r = remote_for_user(f, geteuid());
-    application_t  *app;
+    remote_t      *r = remote_for_user(f, f->uid);
+    application_t *app;
+
+    if (r == NULL)
+        return 0;
+
+    log_info("starting flatpak session for remote %s (uid %d)", r->name, f->uid);
 
     foreach_app(f, app) {
-        if (remote_lookup(f, app->origin) == r)
+        if (remote_lookup(f, app->origin) != r)
+            continue;
+
+        log_info("launching application %s/%s", r->name, app->name);
+
+        if (!f->dry_run)
             ftpk_launch_app(f, app);
     }
 
@@ -111,10 +125,17 @@ int session_start(flatpak_t *f)
 
 int session_stop(flatpak_t *f)
 {
+    pid_t session;
+
     log_info("stopping session for remote %d...", f->uid);
 
     if (f->dry_run)
         return 0;
+
+    if (!(session = ftpk_session_pid(f->uid)))
+        return 0;
+
+    kill(session, f->sig ? f->sig : SIGTERM);
 
     return 0;
 }
@@ -122,19 +143,31 @@ int session_stop(flatpak_t *f)
 
 int session_signal(flatpak_t *f)
 {
-    remote_t       *r = remote_for_user(f, geteuid());
+    remote_t       *r = remote_for_user(f, f->uid);
     application_t  *app;
     int             status;
 
-    log_info("sending signal #%d to session applications...", f->sig);
+    if (f->command == COMMAND_SIGNAL) {
+        log_info("sending session of %d signal #%d", f->uid, f->sig);
 
-    if (f->dry_run)
-        return 0;
+        if (f->dry_run)
+            return 0;
+        else
+            return ftpk_signal_session(f->uid, f->sig);
+    }
+
+
+    log_info("sending applications signal #%d", f->sig);
 
     status = 0;
     foreach_app(f, app) {
-        if (remote_lookup(f, app->origin) == r)
-            if (ftpk_signal_app(f, app, -1, 0, f->sig) < 0)
+        if (remote_lookup(f, app->origin) != r)
+            continue;
+
+        log_info("signalling application %s...", app->name);
+
+        if (!f->dry_run)
+            if (ftpk_signal_app(app, f->uid, getpid(), f->sig) < 0)
                 status = -1;
     }
 

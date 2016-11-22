@@ -90,15 +90,79 @@ uid_t remote_resolve_user(const char *remote, char *usrbuf, size_t size)
 }
 
 
+static void r_free(gpointer data)
+{
+    remote_t *r = data;
+
+    if (r == NULL)
+        return;
+
+    g_object_unref(r->r);
+    free(r);
+}
+
+
+static int remote_cb(flatpak_t *f, FlatpakRemote *r, const char *name)
+{
+    remote_t *remote;
+    uid_t     uid;
+
+    if ((uid = remote_resolve_user(name, NULL, 0)) == (uid_t)-1) {
+        log_warning("remote %s: no associated user, ignoring...", name);
+        return 0;
+    }
+
+    if (uid != f->uid && f->uid != 0) {
+        log_warning("remote %s: for other user %d (!= %d), ignoring...", name,
+                    f->uid, uid);
+        return 0;
+    }
+
+    if ((remote = calloc(1, sizeof(*r))) == NULL)
+        return -1;
+
+    remote->r    = g_object_ref(r);
+    remote->name = name;
+    remote->uid  = uid;
+
+    if (!g_hash_table_insert(f->remotes, (void *)name, remote)) {
+        r_free(remote);
+        return -1;
+    }
+
+    log_info("discovered remote %s", remote->name);
+
+    return 0;
+}
+
+
 int remote_discover(flatpak_t *f)
 {
-    return ftpk_discover_remotes(f);
+    if (f->remotes != NULL)
+        return 0;
+
+    f->remotes = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, r_free);
+
+    if (f->remotes == NULL)
+        return -1;
+
+    if (ftpk_discover_remotes(f, remote_cb) < 0)
+        return -1;
+
+    return 0;
+}
+
+
+void remote_forget(flatpak_t *f)
+{
+    g_hash_table_destroy(f->remotes);
+    f->remotes = NULL;
 }
 
 
 remote_t *remote_lookup(flatpak_t *f, const char *name)
 {
-    return ftpk_remote(f, name);
+    return f && f->remotes ? g_hash_table_lookup(f->remotes, name) : NULL;
 }
 
 
@@ -131,6 +195,25 @@ const char *remote_username(remote_t *r, char *buf, size_t size)
         return NULL;
 
     strncpy(buf, pw->pw_name, size - 1);
+    buf[size - 1] = '\0';
+
+    return buf;
+}
+
+
+const char *remote_url(remote_t *r, char *buf, size_t size)
+{
+    static char  url[1024];
+    char        *p;
+
+    p = flatpak_remote_get_url(r->r);
+
+    if (buf == NULL) {
+        buf  = url;
+        size = sizeof(url);
+    }
+
+    strncpy(buf, p, size - 1);
     buf[size - 1] = '\0';
 
     return buf;

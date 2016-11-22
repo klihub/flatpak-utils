@@ -186,28 +186,30 @@ void mainloop_disable_monitor(flatpak_t *f);
 
 /* flatpak.c */
 void ftpk_exit(flatpak_t *f);
-int ftpk_discover_remotes(flatpak_t *f);
-int ftpk_discover_apps(flatpak_t *f);
-remote_t *ftpk_remote(flatpak_t *f, const char *name);
-application_t *ftpk_app(flatpak_t *f, const char *name);
+int ftpk_discover_remotes(flatpak_t *f,
+                          int (*cb)(flatpak_t *, FlatpakRemote *, const char *));
+int ftpk_discover_apps(flatpak_t *f,
+                       int (*cb)(flatpak_t *, FlatpakInstalledRef *,
+                                 const char *, const char *, GKeyFile *));
 int ftpk_launch_app(flatpak_t *f, application_t *app);
 
 int ftpk_fetch_updates(flatpak_t *f, application_t *app);
 int ftpk_apply_updates(flatpak_t *f, application_t *app);
 int ftpk_update_app(flatpak_t *f, application_t *app);
-int ftpk_signal_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session,
-                    int sig);
-int ftpk_stop_app(flatpak_t *f, application_t *app, uid_t uid, pid_t session);
+int ftpk_signal_app(application_t *app, uid_t uid, pid_t session, int sig);
+int ftpk_stop_app(application_t *app, uid_t uid, pid_t session);
 int ftpk_signal_session(uid_t uid, int sig);
 GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r);
 void ftpk_free_metadata(GKeyFile *f);
 const char *ftpk_get_metadata(GKeyFile *f, const char *section, const char *key);
+pid_t ftpk_session_pid(uid_t uid);
 
 /* remote.c */
 int remote_discover(flatpak_t *f);
 uid_t remote_resolve_user(const char *name, char *buf, size_t size);
 remote_t *remote_lookup(flatpak_t *f, const char *name);
 const char *remote_username(remote_t *r, char *buf, size_t size);
+const char *remote_url(remote_t *r, char *buf, size_t size);
 remote_t *remote_for_user(flatpak_t *f, uid_t uid);
 
 #define foreach_remote(_f, _r)                                          \
@@ -217,6 +219,7 @@ remote_t *remote_for_user(flatpak_t *f, uid_t uid);
 
 /* application.c */
 int app_discover(flatpak_t *f);
+application_t *app_lookup(flatpak_t *f, const char *name);
 int app_fetch_updates(flatpak_t *f, application_t *app);
 int app_update_cached(flatpak_t *f, application_t *app);
 int app_fetch(flatpak_t *f);
@@ -235,7 +238,7 @@ int session_stop(flatpak_t *f);
 int session_signal(flatpak_t *f);
 
 /* filesystem.c */
-int fsys_prepare_sessions(flatpak_t *f);
+int fsys_prepare_session(flatpak_t *f);
 char *fsys_mkpath(char *path, size_t size, const char *fmt, ...);
 int fsys_mkdir(const char *path, mode_t mode);
 int fsys_mkdirp(mode_t, const char *fmt, ...);
