@@ -109,6 +109,7 @@ struct flatpak_s {
     FlatpakInstallation *f;              /* flatpak context */
     GHashTable          *remotes;        /* remotes for applications */
     GHashTable          *apps;           /* installed applications */
+    GHashTable          *updates;        /* pending updates/uninstalled apps */
     GMainLoop           *loop;           /* main loop */
     void               (*sighandler)(flatpak_t *f, int sig);
     sigset_t             blocked;        /* signals we block */
@@ -147,6 +148,16 @@ typedef struct {
     const char          *urgency;        /* update urgency */
     int                  autostart : 1;  /* whether to autostart */
 } application_t;
+
+/* an uninstalled application, or a pending update */
+typedef struct {
+    FlatpakRemoteRef *ref;               /* flatpak (remote) application */
+    application_t    *app;               /* flatpak (local) application */
+    const char       *origin;            /* application origin (remote name) */
+    const char       *name;              /* application name */
+    GKeyFile         *metadata;          /* application metadata */
+    const char       *urgency;           /* update urgency */
+} update_t;
 
 /*
  * function prototypes
@@ -191,15 +202,20 @@ int ftpk_discover_remotes(flatpak_t *f,
 int ftpk_discover_apps(flatpak_t *f,
                        int (*cb)(flatpak_t *, FlatpakInstalledRef *,
                                  const char *, const char *, GKeyFile *));
+int ftpk_discover_updates(flatpak_t *f, const char *remote,
+                          int (*cb)(flatpak_t *, FlatpakRemoteRef *,
+                                    const char *, const char *, GKeyFile *));
 int ftpk_launch_app(flatpak_t *f, application_t *app);
 
-int ftpk_fetch_updates(flatpak_t *f, application_t *app);
+int ftpk_fetch_updates(flatpak_t *f, update_t *u);
 int ftpk_apply_updates(flatpak_t *f, application_t *app);
 int ftpk_update_app(flatpak_t *f, application_t *app);
 int ftpk_signal_app(application_t *app, uid_t uid, pid_t session, int sig);
 int ftpk_stop_app(application_t *app, uid_t uid, pid_t session);
 int ftpk_signal_session(uid_t uid, int sig);
 GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r);
+GKeyFile *ftpk_fetch_metadata(flatpak_t *f, const char *remote,
+                              FlatpakRef *ref);
 void ftpk_free_metadata(GKeyFile *f);
 const char *ftpk_get_metadata(GKeyFile *f, const char *section, const char *key);
 pid_t ftpk_session_pid(uid_t uid);
@@ -219,9 +235,8 @@ remote_t *remote_for_user(flatpak_t *f, uid_t uid);
 
 /* application.c */
 int app_discover(flatpak_t *f);
+int app_discover_updates(flatpak_t *f);
 application_t *app_lookup(flatpak_t *f, const char *name);
-int app_fetch_updates(flatpak_t *f, application_t *app);
-int app_update_cached(flatpak_t *f, application_t *app);
 int app_fetch(flatpak_t *f);
 int app_update(flatpak_t *f);
 
@@ -229,6 +244,11 @@ int app_update(flatpak_t *f);
     GHashTableIter _a##_it;                                             \
     g_hash_table_iter_init(&_a##_it, _f->apps);                         \
     while (g_hash_table_iter_next(&_a##_it, NULL, (void **)&_a))
+
+#define foreach_update(_f, _u)                                          \
+    GHashTableIter _u##_it;                                             \
+    g_hash_table_iter_init(&_u##_it, _f->updates);                      \
+    while (g_hash_table_iter_next(&_u##_it, NULL, (void **)&_u))
 
 /* session.c */
 int session_enable(flatpak_t *f);

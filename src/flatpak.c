@@ -54,6 +54,7 @@ static int ftpk_init(flatpak_t *f)
 
 void ftpk_forget(flatpak_t *f)
 {
+    flatpak_installation_drop_caches(f->f, NULL, NULL);
     g_object_unref(f->f);
     f->f = NULL;
 }
@@ -160,6 +161,55 @@ int ftpk_discover_apps(flatpak_t *f,
 }
 
 
+int ftpk_discover_updates(flatpak_t *f, const char *remote,
+                          int (*cb)(flatpak_t *, FlatpakRemoteRef *,
+                                    const char *, const char *, GKeyFile *))
+{
+    GPtrArray        *arr;
+    FlatpakRemoteRef *ref;
+    GKeyFile         *meta;
+    const char       *origin, *name;
+    GError           *e;
+    int               i;
+
+    if (ftpk_init(f) < 0)
+        return -1;
+
+    e   = NULL;
+    arr = flatpak_installation_list_remote_refs_sync(f->f, remote, NULL, &e);
+
+    if (arr == NULL)
+        goto query_failed;
+
+    for (i = 0; i < (int)arr->len; i++) {
+        ref    = g_ptr_array_index(arr, i);
+        origin = remote;
+        name   = flatpak_ref_get_name(FLATPAK_REF(ref));
+
+        if (flatpak_ref_get_kind(FLATPAK_REF(ref)) != FLATPAK_REF_KIND_APP)
+            continue;
+
+        meta = ftpk_fetch_metadata(f, origin, FLATPAK_REF(ref));
+
+        if (meta == NULL)
+            continue;
+
+        if (cb(f, ref, name, origin, meta) < 0)
+            goto fail;
+    }
+
+    g_ptr_array_unref(arr);
+
+    return 0;
+
+ query_failed:
+    log_error("failed to query pending updates/instals (%s: %d: %s)",
+              g_quark_to_string(e->domain), e->code, e->message);
+ fail:
+    return -1;
+}
+
+
 GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r)
 {
     GKeyFile   *meta;
@@ -198,6 +248,48 @@ GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r)
 }
 
 
+GKeyFile *ftpk_fetch_metadata(flatpak_t *f, const char *remote,
+                              FlatpakRef *ref)
+{
+    GKeyFile   *meta;
+    GBytes     *bytes;
+    const void *data;
+    size_t      size;
+    GError     *e;
+
+    meta = g_key_file_new();
+
+    if (meta == NULL)
+        goto fail;
+
+    e     = NULL;
+    bytes = flatpak_installation_fetch_remote_metadata_sync(f->f, remote, ref,
+                                                            NULL, &e);
+
+    if (bytes == NULL)
+        goto fail_no_metadata;
+
+    data = g_bytes_get_data(bytes, &size);
+
+    if (!g_key_file_load_from_data(meta, data, size, 0, &e))
+        goto fail_no_metadata;
+
+    g_bytes_unref(bytes);
+
+    return meta;
+
+ fail_no_metadata:
+    log_error("failed to fetch metadata for %s from %s (%s: %d: %s)",
+              flatpak_ref_format_ref(ref), remote,
+              g_quark_to_string(e->domain), e->code, e->message);
+ fail:
+    ftpk_free_metadata(meta);
+    g_bytes_unref(bytes);
+
+    return NULL;
+}
+
+
 void ftpk_free_metadata(GKeyFile *meta)
 {
     if (meta != NULL)
@@ -214,32 +306,32 @@ const char *ftpk_get_metadata(GKeyFile *f, const char *section, const char *key)
 static void update_progress_cb(const char *status, guint progress,
                                gboolean estim, gpointer user_data)
 {
-    application_t *app = user_data;
+    update_t *u = user_data;
 
     UNUSED_ARG(estim);
 
-    log_info("%s/%s: %s: %u %%...", app->origin, app->name, status, progress);
+    log_info("%s/%s: %s: %u %%...", u->origin, u->name, status, progress);
 }
 
 
-int ftpk_fetch_updates(flatpak_t *f, application_t *app)
+int ftpk_fetch_updates(flatpak_t *f, update_t *u)
 {
-    const char          *name  = app->name;
+    const char          *name  = u->name;
     FlatpakRefKind       kind  = FLATPAK_REF_KIND_APP;
-    int                  flags = FLATPAK_UPDATE_FLAGS_NO_DEPLOY;
+    int                  flags = u->app ? FLATPAK_UPDATE_FLAGS_NO_DEPLOY : 0;
     GError              *e     = NULL;
-    FlatpakInstalledRef *u;
+    FlatpakInstalledRef *ref;
 
     if (f->dry_run)
         return 0;
 
-    u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
-                                    update_progress_cb, app, NULL, &e);
+    ref = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
+                                      update_progress_cb, u, NULL, &e);
 
-    if (u == NULL && e->code != 0)
+    if (ref == NULL && e->code != 0)
         goto fetch_failed;
 
-    if (u == app->app || u == NULL)
+    if ((u->app != NULL && ref == u->app->app) || ref == NULL)
         return 0;
     else {
         /*

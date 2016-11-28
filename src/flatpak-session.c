@@ -100,6 +100,9 @@ static int fetch_updates(flatpak_t *f)
     if (app_discover(f) < 0)
         return -1;
 
+    if (app_discover_updates(f) < 0)
+        return -1;
+
     if (app_fetch(f) < 0)
         return -1;
 
@@ -122,6 +125,9 @@ static int update_cached(flatpak_t *f)
 static int fetch_and_update(flatpak_t *f)
 {
     if (app_discover(f) < 0)
+        return -1;
+
+    if (app_discover_updates(f) < 0)
         return -1;
 
     if (app_fetch(f) < 0)
