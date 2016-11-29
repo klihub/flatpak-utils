@@ -40,26 +40,10 @@ static void a_free(gpointer data)
     if (a == NULL)
         return;
 
-    g_object_unref(a->app);
-    if (a->metadata != NULL)
-        g_key_file_unref(a->metadata);
-
+    g_object_unref(a->ref);
+    g_object_unref(a->upd);
+    ftpk_free_metadata(a->metadata);
     free(a);
-}
-
-
-static void u_free(gpointer data)
-{
-    update_t *u = data;
-
-    if (u == NULL)
-        return;
-
-    g_object_unref(u->ref);
-    if (u->metadata != NULL)
-        g_key_file_unref(u->metadata);
-
-    free(u);
 }
 
 
@@ -79,10 +63,10 @@ static int app_cb(flatpak_t *f, FlatpakInstalledRef *a, const char *name,
     if ((app = calloc(1, sizeof(*app))) == NULL)
         return -1;
 
-    app->app      = g_object_ref(a);
+    app->ref      = g_object_ref(a);
     app->origin   = origin;
     app->name     = name;
-    app->metadata = meta;
+    app->metadata = ftpk_ref_metadata(meta);
 
     if (!g_hash_table_insert(f->apps, (void *)name, app)) {
         a_free(app);
@@ -98,63 +82,59 @@ static int app_cb(flatpak_t *f, FlatpakInstalledRef *a, const char *name,
 static int update_cb(flatpak_t *f, FlatpakRemoteRef *ref, const char *name,
                      const char *origin, GKeyFile *meta)
 {
-    remote_t      *r;
     application_t *a;
-    update_t      *u;
-    const char    *autoinst, *ahead, *uhead;
+    const char    *install, *ahead, *uhead;
 
-    r = remote_lookup(f, origin);
-    a = app_lookup(f, name);
-
-    if (r == NULL) {
-        log_warning("update %s: no associated remote, ignoring...", name);
+    if (remote_lookup(f, origin) == NULL) {
+        log_warning("update %s/%s: no associated remote, ignoring...",
+                    origin, name);
         return 0;
     }
 
-    if (a != NULL) {
-        uhead = flatpak_ref_get_commit(FLATPAK_REF(ref));
-        ahead = flatpak_ref_get_commit(FLATPAK_REF(a->app));
+    a = app_lookup(f, name);
 
-        if (uhead != NULL && ahead != NULL) {
-            if (!strcmp(ahead, uhead)) {
-                log_warning("app %s/%s already up to date", origin, name);
-                return 0;
-            }
+    if (a == NULL) {
+        install = ftpk_get_metadata(meta, "Application", "install");
+
+        if (install == NULL && !(install[0] == 'y' || install[0] == 't')) {
+            log_warning("application %s/%s: no autoinstall, ignoring...",
+                        origin, name);
+            return 0;
         }
+
+        a = calloc(1, sizeof(*a));
+
+        if (a == NULL)
+            return -1;
+
+        a->origin   = origin;
+        a->name     = name;
+        a->metadata = ftpk_ref_metadata(meta);
     }
     else {
-        autoinst = ftpk_get_metadata(meta, "Application", "autoinstall");
+        uhead = flatpak_ref_get_commit(FLATPAK_REF(ref));
+        ahead = flatpak_ref_get_commit(FLATPAK_REF(a->ref));
 
-        log_warning("uninstalled application %s/%s (autoinstall: %s)",
-                    origin, name, autoinst ? autoinst : "implicit yes");
-
-        if (autoinst != NULL && !(autoinst[0] == 'y' && autoinst[0] == 't')) {
-            log_warning("app: %s/%s denies autoinstallation, skipping...",
-                        origin, name);
+        if (uhead != NULL && ahead != NULL && !strcmp(uhead, ahead)) {
+            log_warning("application %s/%s: already up to date", origin, name);
             return 0;
         }
     }
 
-    u = calloc(1, sizeof(*u));
+    a->upd = g_object_ref(ref);
 
-    if (u == NULL)
-        return -1;
-
-    u->ref      = g_object_ref(ref);
-    u->origin   = origin;
-    u->metadata = meta;
-    u->app      = app_lookup(f, name);
-    u->urgency  = ftpk_get_metadata(meta, "Application", "urgency");
-
-    if (!g_hash_table_insert(f->updates, (void *)name, u)) {
-        u_free(u);
-        return -1;
+    if (a->ref == NULL) {
+        if (!g_hash_table_insert(f->apps, (void *)name, a)) {
+            a_free(a);
+            return -1;
+        }
     }
 
-    log_info("update %s/%s: %s", origin, name,
-             u->app ? "pending update" : "uninstalled app");
+    log_info("discovered %s %s/%s",
+             a->ref ? "pending update for" : "pending installation of",
+             origin, name);
 
-    return 0;
+    return 1;
 }
 
 
@@ -175,7 +155,6 @@ int app_discover(flatpak_t *f)
         return -1;
 
     return 0;
-
 }
 
 
@@ -184,15 +163,7 @@ int app_discover_updates(flatpak_t *f)
     remote_t *r;
     int       status;
 
-    if (f->updates != NULL)
-        return 0;
-
     if (remote_discover(f) < 0)
-        return -1;
-
-    f->updates = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, u_free);
-
-    if (f->updates == NULL)
         return -1;
 
     status = 0;
@@ -208,9 +179,7 @@ int app_discover_updates(flatpak_t *f)
 void app_forget(flatpak_t *f)
 {
     g_hash_table_destroy(f->apps);
-    g_hash_table_destroy(f->updates);
     f->apps    = NULL;
-    f->updates = NULL;
 }
 
 
@@ -220,23 +189,21 @@ application_t *app_lookup(flatpak_t *f, const char *name)
 }
 
 
-update_t *update_lookup(flatpak_t *f, const char *name)
-{
-    return f && f->apps ? g_hash_table_lookup(f->apps, name) : NULL;
-}
-
-
 int app_fetch(flatpak_t *f)
 {
-#if 0
     application_t *app;
     int            status;
 
     status = 0;
 
     foreach_app(f, app) {
-        log_info("fetching updates for application %s/%s...",
-                 app->origin, app->name);
+        if (app->upd == NULL)
+            continue;
+        if (app->ref != NULL)
+            log_info("fetching updates for application %s/%s...",
+                     app->origin, app->name);
+        else
+            log_info("installing application %s/%s...", app->origin, app->name);
 
         switch (ftpk_fetch_updates(f, app)) {
         case 0:  log_info("no pending updates"); break;
@@ -244,27 +211,6 @@ int app_fetch(flatpak_t *f)
         default: status = -1;                    break;
         }
     }
-#else
-    update_t *u;
-    int       status;
-
-    status = 0;
-
-    foreach_update(f, u) {
-        if (u->app != NULL)
-            log_info("fetching updates for application %s/%s...",
-                     u->origin, u->name);
-        else
-            log_info("autoinstalling application %s/%s...", u->origin, u->name);
-
-        switch (ftpk_fetch_updates(f, u)) {
-        case 0:  log_info("no pending updates"); break;
-        case 1:  log_info("updates fetched");    break;
-        default: status = -1;                    break;
-        }
-    }
-
-#endif
 
     return status;
 }
