@@ -101,13 +101,13 @@ int session_list(flatpak_t *f)
 
 int session_start(flatpak_t *f)
 {
-    remote_t      *r = remote_for_user(f, f->uid);
+    remote_t      *r = remote_for_user(f, f->session_uid);
     application_t *app;
 
     if (r == NULL)
         return 0;
 
-    log_info("starting flatpak session for remote %s (uid %d)", r->name, f->uid);
+    log_info("starting flatpak session for remote %s (uid %d)", r->name, r->uid);
 
     foreach_app(f, app) {
         if (remote_lookup(f, app->origin) != r)
@@ -127,15 +127,15 @@ int session_stop(flatpak_t *f)
 {
     pid_t session;
 
-    log_info("stopping session for remote %d...", f->uid);
+    log_info("stopping session for remote %d...", f->session_uid);
 
     if (f->dry_run)
         return 0;
 
-    if (!(session = ftpk_session_pid(f->uid)))
+    if (!(session = ftpk_session_pid(f->session_uid)))
         return 0;
 
-    kill(session, f->sig ? f->sig : SIGTERM);
+    kill(session, f->send_signal ? f->send_signal : SIGTERM);
 
     return 0;
 }
@@ -143,21 +143,23 @@ int session_stop(flatpak_t *f)
 
 int session_signal(flatpak_t *f)
 {
-    remote_t       *r = remote_for_user(f, f->uid);
+    uid_t           uid = f->session_uid;
+    remote_t       *r   = remote_for_user(f, uid);
+    int             sig = f->send_signal;
     application_t  *app;
     int             status;
 
     if (f->command == COMMAND_SIGNAL) {
-        log_info("sending session of %d signal #%d", f->uid, f->sig);
+        log_info("sending session of %d signal #%d", uid, sig);
 
         if (f->dry_run)
             return 0;
         else
-            return ftpk_signal_session(f->uid, f->sig);
+            return ftpk_signal_session(uid, sig);
     }
 
 
-    log_info("sending applications signal #%d", f->sig);
+    log_info("sending applications signal #%d", sig);
 
     status = 0;
     foreach_app(f, app) {
@@ -167,7 +169,7 @@ int session_signal(flatpak_t *f)
         log_info("signalling application %s...", app->name);
 
         if (!f->dry_run)
-            if (ftpk_signal_app(app, f->uid, getpid(), f->sig) < 0)
+            if (ftpk_signal_app(app, uid, getpid(), sig) < 0)
                 status = -1;
     }
 

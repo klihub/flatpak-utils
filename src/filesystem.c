@@ -45,7 +45,7 @@
 int fsys_prepare_session(flatpak_t *f)
 {
     char *dir = fsys_mkpath(NULL, 0, "%s/%s.wants",
-                            f->dir_service, FLATPAK_TARGET);
+                            f->service_dir, FLATPAK_TARGET);
 
     log_info("creating service directory %s...", dir);
 
@@ -221,7 +221,7 @@ char *fsys_service_link(flatpak_t *f, const char *usr, char *path, size_t size)
     d = path;
     l = (int)size;
 
-    n = snprintf(d, l, "%s/%s.wants/", f->dir_service, FLATPAK_TARGET);
+    n = snprintf(d, l, "%s/%s.wants/", f->service_dir, FLATPAK_TARGET);
 
     if (n < 0)
         return NULL;

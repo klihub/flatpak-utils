@@ -112,9 +112,9 @@ static int remote_cb(flatpak_t *f, FlatpakRemote *r, const char *name)
         return 0;
     }
 
-    if (uid != f->uid && f->uid != 0) {
+    if (uid != f->session_uid && f->session_uid != 0) {
         log_warning("remote %s: for other user %d (!= %d), ignoring...", name,
-                    f->uid, uid);
+                    f->session_uid, uid);
         return 0;
     }
 

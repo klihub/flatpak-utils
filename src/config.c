@@ -113,15 +113,15 @@ static inline int is_systemd_generator(const char *argv0)
 
 static void set_defaults(flatpak_t *f, char **argv)
 {
+    memset(f, 0, sizeof(*f));
+    f->sfd        = -1;
     f->argv0      = argv[0];
     f->gpg_verify = 1;
 
     if (is_systemd_generator(argv[0]))
         f->command = COMMAND_GENERATE;
-    else {
-        f->command        = COMMAND_START;
-        f->restart_status = 69;
-    }
+    else
+        f->command = COMMAND_START;
 }
 
 
@@ -241,7 +241,7 @@ static void parse_generate_options(flatpak_t *f, int argc, char **argv)
                     "can't mix options with systemd generator directories");
     }
 
-    f->dir_service = argv[optind];
+    f->service_dir = argv[optind];
     optind += 3;
 
     if (optind <= argc - 1)
@@ -252,6 +252,49 @@ static void parse_generate_options(flatpak_t *f, int argc, char **argv)
 
 static int parse_signal(const char *argv0, const char *sigstr)
 {
+#define NSIGNAL (sizeof(signals) / sizeof(signals[0]))
+    struct signals {
+        const char *name;
+        int         sig;
+        int         denied : 1;
+    } signals[] = {
+#       define ALLOWED(_sig) [SIG##_sig] = { #_sig, SIG##_sig, 0 }
+#       define DENIED(_sig)  [SIG##_sig] = { #_sig, SIG##_sig, 1 }
+        ALLOWED(HUP),
+        ALLOWED(INT),
+        ALLOWED(QUIT),
+        DENIED (ILL),
+        DENIED (TRAP),
+        DENIED (ABRT),
+        DENIED (BUS),
+        DENIED (FPE),
+        DENIED (KILL),
+        ALLOWED(USR1),
+        DENIED (SEGV),
+        ALLOWED(USR2),
+        ALLOWED(PIPE),
+        ALLOWED(ALRM),
+        ALLOWED(TERM),
+        DENIED (STKFLT),
+        ALLOWED(CHLD),
+        ALLOWED(CONT),
+        DENIED (STOP),
+        ALLOWED(TSTP),
+        ALLOWED(TTIN),
+        ALLOWED(TTOU),
+        ALLOWED(URG),
+        ALLOWED(XCPU),
+        ALLOWED(XFSZ),
+        ALLOWED(VTALRM),
+        ALLOWED(PROF),
+        ALLOWED(WINCH),
+        ALLOWED(IO),
+        ALLOWED(PWR),
+        { NULL, -1, 0 },
+#       undef ALLOWED
+#       undef DENIED
+    }, *s;
+
     const char *p = sigstr;
     char       *e;
     int         sig;
@@ -261,59 +304,36 @@ static int parse_signal(const char *argv0, const char *sigstr)
 
         if (e && *e != '\0')
             goto invalid_signal;
+    }
+    else {
+        if (!strncmp(p, "SIG", 3))
+            p += 3;
 
-        return sig;
+        for (sig = 0, s = signals + 1; !sig && s < signals + NSIGNAL; s++) {
+            if (!strcmp(p, s->name))
+                sig = s->sig;
+        }
     }
 
-    if (!strncmp(p, "SIG", 3))
-        p += 3;
+    if (sig < 0 || sig > (int)NSIGNAL)
+        goto invalid_signal;
 
-#define CHECK(_n) if (!strcmp(p, #_n)) return SIG##_n
-    CHECK(HUP);
-    CHECK(INT);
-    CHECK(QUIT);
-/*
-    CHECK(ILL);
-    CHECK(TRAP);
-    CHECK(ABRT);
-*/
-    CHECK(IOT);
-/*
-    CHECK(BUS);
-    CHECK(FPE);
-    CHECK(KILL);
-*/
-    CHECK(USR1);
-/*
-    CHECK(SEGV);
-*/
-    CHECK(USR2);
-    CHECK(PIPE);
-    CHECK(ALRM);
-    CHECK(TERM);
-/*
-    CHECK(STKFLT);
-*/
-    CHECK(CHLD);
-    CHECK(CONT);
-    CHECK(STOP);
-    CHECK(TSTP);
-    CHECK(TTIN);
-    CHECK(TTOU);
-    CHECK(URG);
-    CHECK(XCPU);
-    CHECK(XFSZ);
-    CHECK(VTALRM);
-    CHECK(PROF);
-    CHECK(WINCH);
-    CHECK(IO);
-    CHECK(POLL);
-    CHECK(PWR);
-#undef CHECK
+    s = signals + sig;
+
+    if (s->denied)
+        goto denied_signal;
+
+    return sig;
 
  invalid_signal:
-    print_usage(argv0, EINVAL, "invalid/unsupported signal '%s'", sigstr);
+    print_usage(argv0, EINVAL, "invalid signal '%s'", sigstr);
     return -1;
+
+ denied_signal:
+    print_usage(argv0, EINVAL, "unusable signal '%s'", sigstr);
+    return -1;
+
+#undef NSIGNAL
 }
 
 
@@ -329,7 +349,8 @@ static void parse_start_options(flatpak_t *f, int argc, char **argv)
     int   opt;
     char *e;
 
-    f->uid = geteuid();
+    f->session_uid    = geteuid();
+    f->restart_status = 69;
 
     if (optind >= argc)
         return;
@@ -360,9 +381,9 @@ static void parse_start_options(flatpak_t *f, int argc, char **argv)
 
 static void parse_remote(flatpak_t *f, const char *remote)
 {
-    f->uid = remote_resolve_user(remote, NULL, 0);
+    f->session_uid = remote_resolve_user(remote, NULL, 0);
 
-    if (f->uid == (uid_t)-1)
+    if (f->session_uid == (uid_t)-1)
         print_usage(f->argv0, EINVAL, "no user for remote '%s'", remote);
 }
 
@@ -378,7 +399,7 @@ static void parse_stop_options(flatpak_t *f, int argc, char **argv)
 
     int opt;
 
-    f->uid = geteuid();
+    f->session_uid = geteuid();
 
     if (optind >= argc)
         return;
@@ -390,7 +411,7 @@ static void parse_stop_options(flatpak_t *f, int argc, char **argv)
             break;
 
         case 's':
-            f->sig = parse_signal(f->argv0, optarg);
+            f->send_signal = parse_signal(f->argv0, optarg);
             break;
 
         case '?':
@@ -399,6 +420,17 @@ static void parse_stop_options(flatpak_t *f, int argc, char **argv)
         }
     }
 #   undef OPTIONS
+}
+
+
+static void parse_list_options(flatpak_t *f, int argc, char **argv)
+{
+    if (optind > argc - 1)
+        f->session_uid = geteuid();
+    else if (optind == argc - 1)
+        parse_remote(f, optarg);
+    else
+        print_usage(argv[0], EINVAL, "too many arguments for list");
 }
 
 
@@ -413,8 +445,8 @@ static void parse_signal_options(flatpak_t *f, int argc, char **argv)
 
     int opt;
 
-    f->uid = geteuid();
-    f->sig = SIGTERM;
+    f->session_uid = geteuid();
+    f->send_signal = SIGTERM;
 
     if (optind >= argc)
         return;
@@ -426,7 +458,7 @@ static void parse_signal_options(flatpak_t *f, int argc, char **argv)
             break;
 
         case 's':
-            f->sig = parse_signal(f->argv0, optarg);
+            f->send_signal = parse_signal(f->argv0, optarg);
             break;
 
         case '?':
@@ -474,9 +506,6 @@ static void parse_update_options(flatpak_t *f, int argc, char **argv)
 
 void config_parse_cmdline(flatpak_t *f, int argc, char **argv)
 {
-    memset(f, 0, sizeof(*f));
-    f->sfd = -1;
-
     set_defaults(f, argv);
 
     parse_common_options(f, argc, argv);
@@ -491,6 +520,9 @@ void config_parse_cmdline(flatpak_t *f, int argc, char **argv)
         break;
     case COMMAND_STOP:
         parse_stop_options(f, argc, argv);
+        break;
+    case COMMAND_LIST:
+        parse_list_options(f, argc, argv);
         break;
     case COMMAND_SIGNAL:
         parse_signal_options(f, argc, argv);

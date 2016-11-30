@@ -120,13 +120,13 @@ struct flatpak_s {
     guint                mid;            /* monitoring timer source id */
     int                  exit_code;      /* exit code to exit with */
     /* things coming from command line/configuration */
-    const char          *argv0;          /* us... */
-    const char          *dir_service;    /* systemd generator service dir. */
-    uid_t                uid;            /* user id/remote to act for */
-    int                  sig;            /* signal to send to a session */
+    const char          *argv0;          /* us, our binary... */
     command_t            command;        /* action to perform */
+    const char          *service_dir;    /* systemd generator service dir. */
+    uid_t                session_uid;    /* user id for session/remote */
     int                  restart_status; /* exit status for forced restart */
-    int                  wait_signal;    /* wait signal for start */
+    int                  wait_signal;    /* signal to wait for before start */
+    int                  send_signal;    /* signal to send to session */
     int                  poll_interval;  /* update polling interval */
     int                  dry_run : 1;    /* don't perform, just show actions */
     int                  gpg_verify : 1; /* ignore unverifiable remotes */
