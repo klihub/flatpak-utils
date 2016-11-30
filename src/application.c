@@ -33,7 +33,7 @@
 #include "flatpak-session.h"
 
 
-static void a_free(gpointer data)
+static void app_free(gpointer data)
 {
     application_t *a = data;
 
@@ -69,7 +69,7 @@ static int app_cb(flatpak_t *f, FlatpakInstalledRef *a, const char *name,
     app->metadata = ftpk_ref_metadata(meta);
 
     if (!g_hash_table_insert(f->apps, (void *)name, app)) {
-        a_free(app);
+        app_free(app);
         return -1;
     }
 
@@ -125,7 +125,7 @@ static int update_cb(flatpak_t *f, FlatpakRemoteRef *ref, const char *name,
 
     if (a->ref == NULL) {
         if (!g_hash_table_insert(f->apps, (void *)name, a)) {
-            a_free(a);
+            app_free(a);
             return -1;
         }
     }
@@ -146,7 +146,7 @@ int app_discover(flatpak_t *f)
     if (remote_discover(f) < 0)
         return -1;
 
-    f->apps = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, a_free);
+    f->apps = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, app_free);
 
     if (f->apps == NULL)
         return -1;

@@ -48,27 +48,48 @@ static void print_usage(const char *argv0, int exit_code, const char *fmt, ...)
         va_end(ap);
     }
 
-    fprintf(stderr, "usage: %s [options] {enable|update [options] [remotes]}\n"
+    fprintf(stderr, "usage: %s [common-options] {command} [command-options]}\n"
             "\n"
-            "The command enable will enable all or just the specified\n"
-            "flatpak sessions. The command update the applications for all\n"
-            "or just the selected remote.\n"
+            "The possible commands are:\n"
+            "  generate: act as a systemd generator\n"
+            "    Discover all repositories with an associated session user.\n"
+            "    For all repositories found, generate and enable a systemd\n"
+            "    service for starting up the session and populating it with\n"
+            "    applications. %s will be used to start\n"
+            "    the applications within the session. This is the default\n"
+            "    behavior if the executable binary is %s.\n"
+            "  start: start session applications\n"
+            "    Start applications. Discover all applications originating\n"
+            "    from the repository associated with the current user. Start\n"
+            "    all applications which are not marked exempt from auto-\n"
+            "    starting within the current session.\n"
+            "  stop: stop a session (by sending SIGTERM)\n"
+            "    Stop the session for the current or given user. Discover the\n"
+            "    instance (%s) used to start the session\n"
+            "    and send it SIGTERM. That instance is expected to stop all\n"
+            "    applications running within its session, then exit itself.\n"
+            "  list: list sessions\n"
+            "    List all known sessions, all running sessions, or the session\n"
+            "    session associated with the given user/repository.\n"
+            "  signal: send a signal to a session\n"
+            "    Same as stop but the signal can be specified.\n"
             "\n"
             "The possible common options are:\n"
             "  -u, --allow-unsigned      allow unverifiable (unsigned) remotes\n"
             "  -n, --dry-run             just print, don't generate anything\n"
             "  -v, --verbose             increase logging verbosity\n"
+            "  -d, --debug               enable debug messages\n"
             "  -h, --help                print this help message\n"
             "\n"
             "The possible options for start are:\n"
             "  -r, --restart-status <n>  use n for forced restart exit status\n"
             "\n"
             "The possible options for update are:\n"
-            "  -f, --fetch               just fetch, don't update\n"
-            "  -l, --local               update locally from fetched changes\n"
             "  -m, --monitor             daemonize and poll/fetch updates\n"
             "  -i, --poll-interval ival  use the given interval for polling\n",
-            argv0);
+            /* usage    */argv0,
+            /* generate */FLATPAK_SESSION_PATH, SYSTEMD_GENERATOR,
+            /* stop     */FLATPAK_SESSION_PATH);
 
     if (exit_code < 0)
         return;
@@ -194,12 +215,11 @@ static void parse_command(flatpak_t *f, int argc, char **argv)
 
     command = argv[optind];
 
-    if      (!strcmp(command, "list"))   f->command = COMMAND_LIST;
-    else if (!strcmp(command, "enable")) f->command = COMMAND_GENERATE;
+    if      (!strcmp(command, "enable")) f->command = COMMAND_GENERATE;
     else if (!strcmp(command, "start"))  f->command = COMMAND_START;
     else if (!strcmp(command, "stop"))   f->command = COMMAND_STOP;
+    else if (!strcmp(command, "list"))   f->command = COMMAND_LIST;
     else if (!strcmp(command, "signal")) f->command = COMMAND_SIGNAL;
-    else if (!strcmp(command, "fetch"))  f->command = COMMAND_FETCH;
     else if (!strcmp(command, "update")) f->command = COMMAND_UPDATE;
     else
         print_usage(argv[0], EINVAL, "unknown command '%s'", optarg);
@@ -230,10 +250,78 @@ static void parse_generate_options(flatpak_t *f, int argc, char **argv)
 }
 
 
+static int parse_signal(const char *argv0, const char *sigstr)
+{
+    const char *p = sigstr;
+    char       *e;
+    int         sig;
+
+    if ('0' <= *p && *p <= '9') {
+        sig = strtoul(p, &e, 10);
+
+        if (e && *e != '\0')
+            goto invalid_signal;
+
+        return sig;
+    }
+
+    if (!strncmp(p, "SIG", 3))
+        p += 3;
+
+#define CHECK(_n) if (!strcmp(p, #_n)) return SIG##_n
+    CHECK(HUP);
+    CHECK(INT);
+    CHECK(QUIT);
+/*
+    CHECK(ILL);
+    CHECK(TRAP);
+    CHECK(ABRT);
+*/
+    CHECK(IOT);
+/*
+    CHECK(BUS);
+    CHECK(FPE);
+    CHECK(KILL);
+*/
+    CHECK(USR1);
+/*
+    CHECK(SEGV);
+*/
+    CHECK(USR2);
+    CHECK(PIPE);
+    CHECK(ALRM);
+    CHECK(TERM);
+/*
+    CHECK(STKFLT);
+*/
+    CHECK(CHLD);
+    CHECK(CONT);
+    CHECK(STOP);
+    CHECK(TSTP);
+    CHECK(TTIN);
+    CHECK(TTOU);
+    CHECK(URG);
+    CHECK(XCPU);
+    CHECK(XFSZ);
+    CHECK(VTALRM);
+    CHECK(PROF);
+    CHECK(WINCH);
+    CHECK(IO);
+    CHECK(POLL);
+    CHECK(PWR);
+#undef CHECK
+
+ invalid_signal:
+    print_usage(argv0, EINVAL, "invalid/unsupported signal '%s'", sigstr);
+    return -1;
+}
+
+
 static void parse_start_options(flatpak_t *f, int argc, char **argv)
 {
-#   define OPTIONS "r:"
+#   define OPTIONS "w:r:"
     static struct option options[] = {
+        { "wait-signal"   , required_argument, NULL, 'w' },
         { "restart-status", required_argument, NULL, 'r' },
         { NULL, 0, NULL, 0 },
     };
@@ -257,6 +345,10 @@ static void parse_start_options(flatpak_t *f, int argc, char **argv)
             }
             break;
 
+        case 'w':
+            f->wait_signal = parse_signal(f->argv0, optarg);
+            break;
+
         case '?':
             print_usage(argv[0], EINVAL, "invalid start option");
             break;
@@ -272,33 +364,6 @@ static void parse_remote(flatpak_t *f, const char *remote)
 
     if (f->uid == (uid_t)-1)
         print_usage(f->argv0, EINVAL, "no user for remote '%s'", remote);
-}
-
-
-static void parse_signal_name(flatpak_t *f, const char *signame)
-{
-    const char *p = signame;
-    char       *e;
-
-    if (!strncmp(p, "SIG", 3))
-        p += 3;
-
-    if (!strcmp(p, "HUP"))
-        f->sig = SIGHUP;
-    else if (!strcmp(p, "TERM"))
-        f->sig = SIGTERM;
-    else if (!strcmp(p, "KILL"))
-        f->sig = SIGKILL;
-    else {
-        f->sig = strtol(signame, &e, 10);
-
-        if (e && *e)
-            print_usage(f->argv0, EINVAL,
-                        "invalid/unsupported signal name/number '%s'", signame);
-
-        if (f->sig < 0)
-            f->sig = -f->sig;
-    }
 }
 
 
@@ -325,7 +390,7 @@ static void parse_stop_options(flatpak_t *f, int argc, char **argv)
             break;
 
         case 's':
-            parse_signal_name(f, optarg);
+            f->sig = parse_signal(f->argv0, optarg);
             break;
 
         case '?':
@@ -361,7 +426,7 @@ static void parse_signal_options(flatpak_t *f, int argc, char **argv)
             break;
 
         case 's':
-            parse_signal_name(f, optarg);
+            f->sig = parse_signal(f->argv0, optarg);
             break;
 
         case '?':
@@ -375,10 +440,8 @@ static void parse_signal_options(flatpak_t *f, int argc, char **argv)
 
 static void parse_update_options(flatpak_t *f, int argc, char **argv)
 {
-#   define OPTIONS "flmi:"
+#   define OPTIONS "mi:"
     static struct option options[] = {
-        { "fetch"        , no_argument      , NULL, 'f' },
-        { "local"        , no_argument      , NULL, 'l' },
         { "monitor"      , no_argument      , NULL, 'm' },
         { "poll-interval", required_argument, NULL, 'i' },
         { NULL, 0, NULL, 0 },
@@ -391,20 +454,6 @@ static void parse_update_options(flatpak_t *f, int argc, char **argv)
 
     while ((opt = getopt_long(argc, argv, OPTIONS, options, NULL)) != -1) {
         switch (opt) {
-        case 'f':
-            if (f->command == COMMAND_UPDATE)
-                f->command = COMMAND_FETCH;
-            else
-                print_usage(argv[0], EINVAL, "conflicting 'fetch' option");
-            break;
-
-        case 'l':
-            if (f->command == COMMAND_UPDATE)
-                f->command = COMMAND_APPLY;
-            else
-                print_usage(argv[0], EINVAL, "conflicting 'local' option");
-            break;
-
         case 'm':
             if (f->poll_interval <= 0)
                 f->poll_interval = FLATPAK_POLL_MIN_INTERVAL;

@@ -95,33 +95,6 @@ static int signal_session(flatpak_t *f)
 }
 
 
-static int fetch_updates(flatpak_t *f)
-{
-    if (app_discover(f) < 0)
-        return -1;
-
-    if (app_discover_updates(f) < 0)
-        return -1;
-
-    if (app_fetch(f) < 0)
-        return -1;
-
-    return 0;
-}
-
-
-static int update_cached(flatpak_t *f)
-{
-    if (app_discover(f) < 0)
-        return -1;
-
-    if (app_update(f) < 0)
-        return -1;
-
-    return 0;
-}
-
-
 static int fetch_and_update(flatpak_t *f)
 {
     if (app_discover(f) < 0)
@@ -164,9 +137,6 @@ static void sighandler(flatpak_t *f, int signum)
     case SIGURG:
         log_info("received SIGURG");
         switch (f->command) {
-        case COMMAND_FETCH:
-            fetch_updates(f);
-            break;
         case COMMAND_UPDATE:
             fetch_and_update(f);
             break;
@@ -198,15 +168,7 @@ static void monitor_cb(flatpak_t *f)
         return;
 
     f->updating = 1;
-
-    switch (f->command) {
-    case COMMAND_FETCH:  fetch_updates(f);     break;
-    case COMMAND_APPLY:  update_cached(f);     break;
-    case COMMAND_UPDATE: fetch_and_update(f);  break;
-    default:
-        break;
-    }
-
+    fetch_and_update(f);
     f->updating = 0;
 }
 
@@ -239,8 +201,6 @@ int main(int argc, char **argv)
     case COMMAND_START:    start_session(&f);     break;
     case COMMAND_STOP:     stop_session(&f);      break;
     case COMMAND_SIGNAL:   signal_session(&f);    break;
-    case COMMAND_FETCH:    fetch_updates(&f);     break;
-    case COMMAND_APPLY:    update_cached(&f);     break;
     case COMMAND_UPDATE:   fetch_and_update(&f);  break;
     default:
         log_error("unknown command");

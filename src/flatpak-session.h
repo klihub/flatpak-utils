@@ -85,20 +85,21 @@
 #    define FLATPAK_POLL_MIN_INTERVAL /*(5 * 60)*/ 15
 #endif
 
+#define FLATPAK_KEY_URGENCY "X-Urgency"
+#define FLATPAK_KEY_START   "X-Start"
+
+
 /* mark unused arguments and silence the compiler about them */
 #define UNUSED_ARG(arg) (void)arg
 
 /* commands/modes of operation */
 typedef enum {
     COMMAND_UNKNOWN = -1,
-    COMMAND_NONE,
-    COMMAND_LIST,                        /* list sessions, users and flatpaks */
     COMMAND_GENERATE,                    /* generate a systemd session */
     COMMAND_START,                       /* start flatpaks for a session */
     COMMAND_STOP,                        /* stop flatpaks for a session */
+    COMMAND_LIST,                        /* list sessions, users and flatpaks */
     COMMAND_SIGNAL,                      /* signal a flatpak session */
-    COMMAND_FETCH,                       /* fetch updates from remotes */
-    COMMAND_APPLY,                       /* update flatpaks from local cache */
     COMMAND_UPDATE,                      /* fetch updates and apply them */
 } command_t;
 
@@ -106,7 +107,7 @@ typedef enum {
 typedef struct flatpak_s flatpak_t;
 
 struct flatpak_s {
-    FlatpakInstallation *f;              /* flatpak context */
+    FlatpakInstallation *f;              /* flatpak (system) context */
     GHashTable          *remotes;        /* remotes for applications */
     GHashTable          *apps;           /* installed applications */
     GMainLoop           *loop;           /* main loop */
@@ -121,10 +122,11 @@ struct flatpak_s {
     /* things coming from command line/configuration */
     const char          *argv0;          /* us... */
     const char          *dir_service;    /* systemd generator service dir. */
-    uid_t                uid;            /* user id to stop session for */
+    uid_t                uid;            /* user id/remote to act for */
     int                  sig;            /* signal to send to a session */
     command_t            command;        /* action to perform */
     int                  restart_status; /* exit status for forced restart */
+    int                  wait_signal;    /* wait signal for start */
     int                  poll_interval;  /* update polling interval */
     int                  dry_run : 1;    /* don't perform, just show actions */
     int                  gpg_verify : 1; /* ignore unverifiable remotes */
