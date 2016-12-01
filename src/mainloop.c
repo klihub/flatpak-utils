@@ -37,6 +37,20 @@
 #include "flatpak-session.h"
 
 
+int mainloop_needed(flatpak_t *f)
+{
+    switch (f->command) {
+    case COMMAND_UPDATE:
+        return f->poll_interval > 0;
+    case COMMAND_START:
+    case COMMAND_STOP:
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+
 void mainloop_create(flatpak_t *f)
 {
     if (f->loop != NULL)

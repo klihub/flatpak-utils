@@ -85,9 +85,11 @@
 #    define FLATPAK_POLL_MIN_INTERVAL /*(5 * 60)*/ 15
 #endif
 
-#define FLATPAK_KEY_URGENCY "X-Urgency"
-#define FLATPAK_KEY_START   "X-Start"
-
+#define FLATPAK_SECTION_APP    "Application"
+#define FLATPAK_SECTION_REFKIT "Application"
+#define FLATPAK_KEY_START      "X-Start"
+#define FLATPAK_KEY_INSTALL    "X-Install"
+#define FLATPAK_KEY_URGENCY    "X-Urgency"
 
 /* mark unused arguments and silence the compiler about them */
 #define UNUSED_ARG(arg) (void)arg
@@ -137,18 +139,20 @@ struct flatpak_s {
 typedef struct {
     FlatpakRemote *r;                    /* flatpak remote */
     const char    *name;                 /* remote name */
-    uid_t          uid;                  /* associated user for session */
+    const char    *url;                  /* repository URL */
+    uid_t          session_uid;          /* associated user for session */
 } remote_t;
 
 /* an installed application */
 typedef struct {
-    FlatpakInstalledRef *ref;            /* flatpak application */
-    FlatpakRemoteRef    *upd;            /* pending update/install */
-    const char          *origin;         /* application origin (remote name) */
-    GKeyFile            *metadata;       /* application metadata */
+    FlatpakInstalledRef *lref;           /* flatpak application */
+    FlatpakRemoteRef    *rref;           /* pending update/installation */
+    const char          *origin;         /* remote name */
     const char          *name;           /* application name */
+    GKeyFile            *meta;           /* application metadata */
     const char          *urgency;        /* update urgency */
-    int                  autostart : 1;  /* whether to autostart */
+    int                  start : 1;      /* start automatically */
+    int                  updates : 1;    /* pending updates */
 } application_t;
 
 
@@ -177,6 +181,7 @@ void log_open(flatpak_t *f);
 void config_parse_cmdline(flatpak_t *f, int argc, char **argv);
 
 /* mainloop.c */
+int mainloop_needed(flatpak_t *f);
 void mainloop_create(flatpak_t *f);
 void mainloop_destroy(flatpak_t *f);
 void mainloop_run(flatpak_t *f);
@@ -190,8 +195,7 @@ void mainloop_disable_monitor(flatpak_t *f);
 
 /* flatpak.c */
 void ftpk_exit(flatpak_t *f);
-int ftpk_discover_remotes(flatpak_t *f,
-                          int (*cb)(flatpak_t *, FlatpakRemote *, const char *));
+int ftpk_discover_remotes(flatpak_t *f);
 int ftpk_discover_apps(flatpak_t *f,
                        int (*cb)(flatpak_t *, FlatpakInstalledRef *,
                                  const char *, const char *, GKeyFile *));

@@ -175,14 +175,8 @@ static void monitor_cb(flatpak_t *f)
 
 static void setup_monitor(flatpak_t *f)
 {
-    mainloop_enable_monitor(f, monitor_cb);
-}
-
-
-static inline int needs_mainloop(flatpak_t *f)
-{
-    return (f->poll_interval > 0 ||
-            f->command == COMMAND_START || f->command == COMMAND_STOP);
+    if (f->poll_interval > 0)
+        mainloop_enable_monitor(f, monitor_cb);
 }
 
 
@@ -192,7 +186,7 @@ int main(int argc, char **argv)
 
     config_parse_cmdline(&f, argc, argv);
 
-    if (needs_mainloop(&f))
+    if (mainloop_needed(&f))
         mainloop_create(&f);
 
     switch (f.command) {
@@ -203,16 +197,13 @@ int main(int argc, char **argv)
     case COMMAND_SIGNAL:   signal_session(&f);    break;
     case COMMAND_UPDATE:   fetch_and_update(&f);  break;
     default:
-        log_error("unknown command");
+        log_error("internal error: unknown command");
         exit(1);
     }
 
-    if (needs_mainloop(&f)) {
+    if (mainloop_needed(&f)) {
         setup_signals(&f);
-
-        if (f.command != COMMAND_START)
-            setup_monitor(&f);
-
+        setup_monitor(&f);
         mainloop_run(&f);
     }
 

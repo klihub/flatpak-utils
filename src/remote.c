@@ -138,31 +138,13 @@ static int remote_cb(flatpak_t *f, FlatpakRemote *r, const char *name)
 
 int remote_discover(flatpak_t *f)
 {
-    if (f->remotes != NULL)
-        return 0;
-
-    f->remotes = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, r_free);
-
-    if (f->remotes == NULL)
-        return -1;
-
-    if (ftpk_discover_remotes(f, remote_cb) < 0)
-        return -1;
-
-    return 0;
-}
-
-
-void remote_forget(flatpak_t *f)
-{
-    g_hash_table_destroy(f->remotes);
-    f->remotes = NULL;
+    return ftpk_discover_remotes(f);
 }
 
 
 remote_t *remote_lookup(flatpak_t *f, const char *name)
 {
-    return f && f->remotes ? g_hash_table_lookup(f->remotes, name) : NULL;
+    return ftpk_lookup_remote(f, name);
 }
 
 
@@ -171,7 +153,7 @@ remote_t *remote_for_user(flatpak_t *f, uid_t uid)
     remote_t *r;
 
     foreach_remote(f, r) {
-        if (r->uid == uid)
+        if (r->session_uid == uid)
             return r;
     }
 

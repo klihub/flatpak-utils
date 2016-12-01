@@ -81,13 +81,12 @@ int session_list(flatpak_t *f)
 {
     remote_t      *r;
     application_t *app;
-    const char    *url, *usr;
+    const char    *usr;
 
     foreach_remote(f, r) {
-        url = remote_url(r, NULL, 0);
         usr = remote_username(r, NULL, 0);
 
-        printf("remote %s (%s, user %d (%s)):\n", r->name, url, r->uid, usr);
+        printf("remote %s (%s, user %d (%s)):\n", r->name, r->url, r->uid, usr);
 
         foreach_app(f, app) {
             if (!strcmp(app->origin, r->name))

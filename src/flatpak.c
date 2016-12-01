@@ -39,39 +39,98 @@
 #include "flatpak-session.h"
 
 
-static int ftpk_init(flatpak_t *f)
+static void remote_free(gpointer ptr)
 {
-    GError *e = NULL;
+    remote_t *r = ptr;
 
-    if (f->f || (f->f = flatpak_installation_new_system(NULL, &e)))
-        return 0;
+    if (r == NULL)
+        return;
 
-    log_error("failed to initialize flatpak library (%s: %d:c%s)",
-              g_quark_to_string(e->domain), e->code, e->message);
-    return -1;
+    g_object_unref(r->r);
+    free(r);
 }
 
 
-void ftpk_forget(flatpak_t *f)
+static void app_free(gpointer ptr)
 {
-    flatpak_installation_drop_caches(f->f, NULL, NULL);
+    application_t *a = ptr;
+
+    if (a == NULL)
+        return;
+
+    g_object_unref(a->lref);
+    g_object_unref(a->rref);
+    metadata_unref(a->meta);
+
+    free(a);
+}
+
+
+static int ftpk_init(flatpak_t *f)
+{
+    GError *e;
+
+    if (f->f != NULL)
+        return 0;
+
+    e    = NULL;
+    f->f = flatpak_installation_new_system(NULL, &e);
+
+    if (f->f == NULL)
+        goto fail;
+
+#define r_free remote_free
+#define a_free app_free
+    f->remotes = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, r_free);
+    f->apps    = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, a_free);
+#undef r_free
+#undef a_free
+
+    if (f->remotes == NULL || f->apps == NULL)
+        goto fail;
+
+    return 0;
+
+ fail:
+    log_error("flatpak library failed to initialize (%s: %d: %s)",
+              e ? g_quark_to_string(e->domain) : "libc",
+              e ? e->code                      : errno,
+              e ? e->message                   : strerror(errno));
+    ftpk_exit(f);
+}
+
+
+void ftpk_reset(flatpak_t *f)
+{
+    ftpk_forget_remotes(f);
+    ftpk_forget_apps(f);
+}
+
+
+void ftpk_exit(flatpak_t *f)
+{
+    ftpk_reset(f);
     g_object_unref(f->f);
     f->f = NULL;
 }
 
 
-int ftpk_discover_remotes(flatpak_t *f,
-                          int (*cb)(flatpak_t *, FlatpakRemote *, const char *))
+int ftpk_discover_remotes(flatpak_t *f)
 {
     GPtrArray     *arr;
-    FlatpakRemote *r;
-    const char    *name;
     GError        *e;
+    remote_t      *r;
+    FlatpakRemote *rem;
+    const char    *name, *url;
     int            i;
+
+    if (f->remotes != NULL)
+        return 0;
 
     if (ftpk_init(f) < 0)
         return -1;
 
+    r   = NULL;
     e   = NULL;
     arr = flatpak_installation_list_remotes(f->f, NULL, &e);
 
@@ -79,20 +138,41 @@ int ftpk_discover_remotes(flatpak_t *f,
         goto query_failed;
 
     for (i = 0; i < (int)arr->len; i++) {
-        r    = g_ptr_array_index(arr, i);
-        name = flatpak_remote_get_name(r);
+        rem  = g_ptr_array_index(arr, i);
+        name = flatpak_remote_get_name(rem);
+        url  = flatpak_remote_get_url(rem);
 
-        if (flatpak_remote_get_disabled(r)) {
-            log_warning("remote %s: disabled, ignoring...", name);
+        if (flatpak_remote_get_disabled(rem)) {
+            log_warning("remote %s: disabled", name);
             continue;
         }
 
-        if (!flatpak_remote_get_gpg_verify(r) && f->gpg_verify) {
-            log_warning("remote %s: can't be GPG-verified, ignorging...", name);
+        if (flatpak_remote_get_gpg_verify(rem) && f->gpg_verify) {
+            log_warning("remote %s: can't be GPG-verified", name);
             continue;
         }
 
-        if (cb(f, r, name) < 0)
+        if ((uid = remote_resolve_user(name, NULL, 0)) == (uid_t)-1) {
+            log_warning("remote %s: no session user", name);
+            continue;
+        }
+
+        if (f->session_uid != 0 && uid != f->session_uid) {
+            log_debug("remote %s: not for session user %d", name, uid);
+            continue;
+        }
+
+        r = calloc(1, sizeof(*r));
+
+        if (r == NULL)
+            goto fail;
+
+        r->r           = g_object_ref(rem);
+        r->name        = name;
+        r->url         = url;
+        r->session_uid = uid;
+
+        if (!g_hash_table_insert(f->remotes, (void *)name, r))
             goto fail;
     }
 
@@ -100,31 +180,147 @@ int ftpk_discover_remotes(flatpak_t *f,
 
     return 0;
 
-
  query_failed:
-    log_error("failed to query flatpak remotes (%s: %d: %s)",
+    log_error("flatpak remote query failed (%s: %d: %s)",
               g_quark_to_string(e->domain), e->code, e->message);
  fail:
     g_ptr_array_unref(arr);
+    remote_free(r);
 
     return -1;
 }
 
 
-int ftpk_discover_apps(flatpak_t *f,
-                       int (*cb)(flatpak_t *, FlatpakInstalledRef *,
-                                 const char *, const char *, GKeyFile *))
+void ftpk_forget_remotes(flatpak_t *f)
+{
+    if (f == NULL)
+        return;
+
+    g_hash_table_destroy(f->remotes);
+    f->remotes = NULL;
+}
+
+
+remote_t *ftpk_lookup_remote(flatpak_t *f, const char *name)
+{
+    return f && f->remotes ? g_hash_table_lookup(f->remotes, name) : NULL;
+}
+
+
+static GKeyFile *metadata_load(FlatpakInstalledRef *lref)
+{
+    GKeyFile   *meta;
+    GBytes     *bytes;
+    const void *data;
+    size_t      size;
+    GError     *e;
+
+    meta = g_key_file_new();
+
+    if (meta == NULL)
+        goto fail;
+
+    e     = NULL;
+    bytes = flatpak_installed_ref_load_metadata(lref, NULL, &e);
+
+    if (bytes == NULL)
+        goto fail_no_data;
+
+    data = g_bytes_get_data(bytes, &size);
+
+    if (!g_key_file_load_from_data(meta, data, size, 0, &e))
+        goto fail_no_data;
+
+    g_bytes_unref(bytes);
+
+    return meta;
+
+ fail_no_data:
+    log_error("failed to load flatpak metadata (%s: %d: %s)",
+              g_quark_to_string(e->domain), e->code, e->message);
+ fail:
+    metadata_free(meta);
+    g_bytes_unref(bytes);
+
+    return NULL;
+}
+
+
+static void metadata_free(GKeyFile *m)
+{
+    if (m)
+        g_key_file_unref(m);
+}
+
+
+static const char *metadata_get(GKeyFile *m, const char *sec, const char *key)
+{
+    return m ? g_key_file_get_value(m, sec, key, NULL) : NULL;
+}
+
+
+static GKeyFile *metadata_fetch(FlatpakRemoteRef *rref)
+{
+    return NULL;
+}
+
+
+static int wants_autostart(GKeyFile *m)
+{
+    const char *v;
+
+    if (m == NULL)
+        return 0;
+
+    v = metadata_get(m, FLATPAK_SECTION_REFKIT, FLATPAK_KEY_START);
+
+    if (v == NULL)
+        return 1;
+
+    return !v || !strcasecmp(v, "yes") || !strcasecmp(v, "true");
+}
+
+
+static int wants_autoinstall(GKeyFile *m)
+{
+    const char *v;
+
+    if (m == NULL)
+        return 0;
+
+    v = metadata_get(m, FLATPAK_SECTION_REFKIT, FLATPAK_KEY_INSTALL);
+
+    if (v == NULL)
+        return 1;
+
+    return !v || !strcasecmp(v, "yes") || !strcasecmp(v, "true");
+}
+
+
+static const char *wants_urgency(GKeyFile *m)
+{
+    const char *v;
+
+    if (m == NULL)
+        return 0;
+
+    v = metadata_get(m, FLATPAK_SECTION_REFKIT, FLATPAK_KEY_URGENCY);
+
+    return v ? v : "none";
+}
+
+
+int ftpk_discover_apps(flatpak_t *f)
 {
     GPtrArray           *arr;
-    FlatpakInstalledRef *ref;
+    GError              *e;
+    application_t       *a;
+    remote_t            *r;
     FlatpakRefKind       knd;
+    FlatpakInstalledRef *lref;
     const char          *origin, *name;
     GKeyFile            *meta;
-    GError              *e;
     int                  i;
-
-    if (ftpk_init(f) < 0)
-        return -1;
 
     knd = FLATPAK_REF_KIND_APP;
     e   = NULL;
@@ -134,18 +330,39 @@ int ftpk_discover_apps(flatpak_t *f,
         goto query_failed;
 
     for (i = 0; i < (int)arr->len; i++) {
-        ref    = g_ptr_array_index(arr, i);
-        origin = flatpak_installed_ref_get_origin(ref);
+        lref   = g_ptr_array_index(arr, i);
+        origin = flatpak_installed_ref_get_origin(lref);
+        r      = ftpk_lookup_remote(f, origin);
 
-        if ((meta = ftpk_load_metadata(ref)) == NULL)
-            goto fail;
-
-        if ((name = ftpk_get_metadata(meta, "Application", "name")) == NULL) {
-            log_warning("app without a name, ignoring...");
+        if (r == NULL) {
+            log_warning("ignoring app without associated remote");
             continue;
         }
 
-        if (cb(f, ref, name, origin, meta) < 0)
+        meta = metadata_load(f, lref);
+
+        if (meta == NULL)
+            goto failed;
+
+        name = metadata_get(meta, "Application", "name");
+
+        if (name == NULL) {
+            log_warning("ignoring app without a name");
+            metadata_free(meta);
+            continue;
+        }
+
+        a = calloc(1, sizeof(*a));
+
+        if (a == NULL)
+            goto fail;
+
+        a->lref   = g_object_ref(lref);
+        a->origin = origin;
+        a->name   = name;
+        a->meta   = meta;
+
+        if (!g_hash_table_insert(f->apps, (void *)name, a))
             goto fail;
     }
 
@@ -154,11 +371,87 @@ int ftpk_discover_apps(flatpak_t *f,
     return 0;
 
  query_failed:
-    log_error("failed to query installed applications (%s: %d: %s)",
+    log_error("flatpak application query failed (%s: %d: %s)",
               g_quark_to_string(e->domain), e->code, e->message);
+    goto fail;
+
  fail:
+    g_ptr_array_unref(arr);
+    app_free(a);
+
     return -1;
 }
+
+
+int ftpk_discover_updates(flatpak_t *f)
+{
+    GPtrArray        *arr;
+    FlatpakRemoteRef *rref;
+    remote_t         *r;
+    application_t    *a;
+    GKeyFile         *meta;
+    const char       *origin, *name, *urgency, *install;
+    GError           *e;
+    int               i;
+
+    if (ftpk_init(f) < 0)
+        return -1;
+
+    if (ftpk_discover_apps(f) < 0)
+        return -1;
+
+    ftpk_foreach_remote(f, r) {
+        meta = NULL;
+        e    = NULL;
+        name = r->name;
+        arr  = flatpak_installation_list_remote_refs_sync(f->f, name, NULL, &e);
+
+        if (arr == NULL && e != NULL && e->code != 0)
+            goto query_failed;
+
+        for (i = 0; i < (int)arr->len; i++) {
+            rref   = g_ptr_array_index(arr, i);
+            origin = r->name;
+            name   = flatpak_ref_get_name(FLATPAK_REF(rref));
+
+            if (flatpak_ref_get_kind(FLATPAK_REF(rref)) != FLATPAK_REF_KIND_APP)
+                continue;
+
+            meta = fetch_metadata(f, origin, FLATPAK_REF(rref));
+
+            if (meta == NULL) {
+                log_warning("ignorning update without metadata");
+                continue;
+            }
+
+            a = ftpk_lookup_app(f, name);
+
+            if (a == NULL) {
+                if (!wants_autoinstall(meta)) {
+                    log_warning("app %s: not autoinstalled, ignoring...", name);
+                    continue;
+                }
+            }
+        }
+    }
+}
+
+
+void ftpk_forget_apps(flatpak_t *f)
+{
+    if (f == NULL)
+        return;
+
+    g_hash_table_destroy(f->apps);
+    f->apps = NULL;
+}
+
+
+application_t *ftpk_lookup_app(flatpak_t *f, const char *name)
+{
+    return f && f->apps ? g_hash_table_lookup(f->apps, name) : NULL;
+}
+
 
 
 int ftpk_discover_updates(flatpak_t *f, const char *remote,
