@@ -66,7 +66,7 @@ int session_enable(flatpak_t *f)
 
     status = 0;
 
-    foreach_remote(f, r) {
+    ftpk_foreach_remote(f, r) {
         log_info("setting up session for remote %s...", r->name);
 
         if (session_link(f, r) < 0)
@@ -80,17 +80,18 @@ int session_enable(flatpak_t *f)
 int session_list(flatpak_t *f)
 {
     remote_t      *r;
-    application_t *app;
+    application_t *a;
     const char    *usr;
 
-    foreach_remote(f, r) {
+    ftpk_foreach_remote(f, r) {
         usr = remote_username(r, NULL, 0);
 
-        printf("remote %s (%s, user %d (%s)):\n", r->name, r->url, r->uid, usr);
+        printf("remote %s (%s, user %d (%s)):\n", r->name, r->url,
+               r->session_uid, usr);
 
-        foreach_app(f, app) {
-            if (!strcmp(app->origin, r->name))
-                printf("    application %s\n", app->name);
+        ftpk_foreach_app(f, a) {
+            if (!strcmp(a->origin, r->name))
+                printf("    application %s\n", a->name);
         }
     }
 
@@ -101,21 +102,22 @@ int session_list(flatpak_t *f)
 int session_start(flatpak_t *f)
 {
     remote_t      *r = remote_for_user(f, f->session_uid);
-    application_t *app;
+    application_t *a;
 
     if (r == NULL)
         return 0;
 
-    log_info("starting flatpak session for remote %s (uid %d)", r->name, r->uid);
+    log_info("starting flatpak session for remote %s (uid %d)",
+             r->name, r->session_uid);
 
-    foreach_app(f, app) {
-        if (remote_lookup(f, app->origin) != r)
+    ftpk_foreach_app(f, a) {
+        if (remote_lookup(f, a->origin) != r)
             continue;
 
-        log_info("launching application %s/%s", r->name, app->name);
+        log_info("launching application %s/%s", r->name, a->name);
 
         if (!f->dry_run)
-            ftpk_launch_app(f, app);
+            ftpk_launch_app(f, a);
     }
 
     return 0;
@@ -161,7 +163,7 @@ int session_signal(flatpak_t *f)
     log_info("sending applications signal #%d", sig);
 
     status = 0;
-    foreach_app(f, app) {
+    ftpk_foreach_app(f, app) {
         if (remote_lookup(f, app->origin) != r)
             continue;
 

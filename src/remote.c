@@ -90,52 +90,6 @@ uid_t remote_resolve_user(const char *remote, char *usrbuf, size_t size)
 }
 
 
-static void r_free(gpointer data)
-{
-    remote_t *r = data;
-
-    if (r == NULL)
-        return;
-
-    g_object_unref(r->r);
-    free(r);
-}
-
-
-static int remote_cb(flatpak_t *f, FlatpakRemote *r, const char *name)
-{
-    remote_t *remote;
-    uid_t     uid;
-
-    if ((uid = remote_resolve_user(name, NULL, 0)) == (uid_t)-1) {
-        log_warning("remote %s: no associated user, ignoring...", name);
-        return 0;
-    }
-
-    if (uid != f->session_uid && f->session_uid != 0) {
-        log_warning("remote %s: for other user %d (!= %d), ignoring...", name,
-                    f->session_uid, uid);
-        return 0;
-    }
-
-    if ((remote = calloc(1, sizeof(*r))) == NULL)
-        return -1;
-
-    remote->r    = g_object_ref(r);
-    remote->name = name;
-    remote->uid  = uid;
-
-    if (!g_hash_table_insert(f->remotes, (void *)name, remote)) {
-        r_free(remote);
-        return -1;
-    }
-
-    log_info("discovered remote %s", remote->name);
-
-    return 0;
-}
-
-
 int remote_discover(flatpak_t *f)
 {
     return ftpk_discover_remotes(f);
@@ -152,7 +106,7 @@ remote_t *remote_for_user(flatpak_t *f, uid_t uid)
 {
     remote_t *r;
 
-    foreach_remote(f, r) {
+    ftpk_foreach_remote(f, r) {
         if (r->session_uid == uid)
             return r;
     }
@@ -171,7 +125,7 @@ const char *remote_username(remote_t *r, char *buf, size_t size)
         size = sizeof(user);
     }
 
-    pw = getpwuid(r->uid);
+    pw = getpwuid(r->session_uid);
 
     if (pw == NULL)
         return NULL;

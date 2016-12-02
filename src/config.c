@@ -426,7 +426,7 @@ static void parse_stop_options(flatpak_t *f, int argc, char **argv)
 static void parse_list_options(flatpak_t *f, int argc, char **argv)
 {
     if (optind > argc - 1)
-        f->session_uid = geteuid();
+        /*f->session_uid = geteuid();*/;
     else if (optind == argc - 1)
         parse_remote(f, optarg);
     else
