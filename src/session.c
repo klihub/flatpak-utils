@@ -111,10 +111,10 @@ int session_start(flatpak_t *f)
              r->name, r->session_uid);
 
     ftpk_foreach_app(f, a) {
-        if (remote_lookup(f, a->origin) != r)
+        if (!a->start)
             continue;
 
-        log_info("launching application %s/%s", r->name, a->name);
+        log_info("launching application %s/%s", a->origin, a->name);
 
         if (!f->dry_run)
             ftpk_launch_app(f, a);

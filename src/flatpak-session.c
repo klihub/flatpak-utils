@@ -61,6 +61,9 @@ static int list_sessions(flatpak_t *f)
 
 static int start_session(flatpak_t *f)
 {
+    if (f->wait_signal)
+        return 0;
+
     if (app_discover(f) < 0)
         return -1;
 
@@ -115,34 +118,39 @@ static int fetch_and_update(flatpak_t *f)
 
 static void sighandler(flatpak_t *f, int signum)
 {
+    log_info("received signal %d (%s)", signum, strsignal(signum));
+
     if (f->command == COMMAND_START) {
-        f->send_signal = signum;
-        session_signal(f);
+        if (signum == f->wait_signal) {
+            f->wait_signal = 0;
+            start_session(f);
+            return;
+        }
+        else {
+            f->send_signal = signum;
+            signal_session(f);
+        }
     }
 
     switch (signum) {
-    case SIGHUP:
-        log_info("received SIGHUP");
-        if (f->command == COMMAND_START)
-            exit(f->restart_status);
-        break;
-    case SIGINT:
-        log_info("received SIGINT");
-        mainloop_quit(f, 0);
-        break;
-    case SIGTERM:
-        log_info("received SIGTERM");
-        mainloop_quit(f, 0);
-        break;
+        case SIGHUP:
+            if (f->restart_status != 0)
+                exit(f->restart_status);
+            break;
+
+        case SIGINT:
+            mainloop_quit(f, 0);
+            break;
+
+        case SIGTERM:
+            mainloop_quit(f, 0);
+            break;
+
     case SIGURG:
-        log_info("received SIGURG");
-        switch (f->command) {
-        case COMMAND_UPDATE:
+        if (f->command == COMMAND_UPDATE)
             fetch_and_update(f);
-            break;
-        default:
-            break;
-        }
+        break;
+
     default:
         break;
     }

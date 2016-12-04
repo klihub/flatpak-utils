@@ -413,6 +413,7 @@ int ftpk_discover_apps(flatpak_t *f)
         a->origin = origin;
         a->name   = name;
         a->meta   = meta;
+        a->start  = wants_autostart(meta);
 
         if (!g_hash_table_insert(f->apps, (void *)name, a))
             goto fail;
