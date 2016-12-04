@@ -6,7 +6,7 @@ After=systemd-user-sessions.service network.service
 StandardInput=null
 StandardOutput=journal
 StandardError=journal
-ExecStart=/usr/bin/flatpak-session -vvv update --poll-interval 5m
+ExecStart=/usr/bin/flatpak-session -vvv update --poll-interval 5m -s SIGCONT
 
 [Install]
 WantedBy=multi-user.target
