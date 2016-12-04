@@ -86,7 +86,8 @@ static void print_usage(const char *argv0, int exit_code, const char *fmt, ...)
             "\n"
             "The possible options for update are:\n"
             "  -m, --monitor             daemonize and poll/fetch updates\n"
-            "  -i, --poll-interval ival  use the given interval for polling\n",
+            "  -i, --poll-interval ival  use the given interval for polling\n"
+            "  -s, --start-signal <sig>  signal sessions after initial update\n",
             /* usage    */argv0,
             /* generate */FLATPAK_SESSION_PATH, SYSTEMD_GENERATOR,
             /* stop     */FLATPAK_SESSION_PATH);
@@ -472,10 +473,11 @@ static void parse_signal_options(flatpak_t *f, int argc, char **argv)
 
 static void parse_update_options(flatpak_t *f, int argc, char **argv)
 {
-#   define OPTIONS "mi:"
+#   define OPTIONS "mi:s:"
     static struct option options[] = {
         { "monitor"      , no_argument      , NULL, 'm' },
         { "poll-interval", required_argument, NULL, 'i' },
+        { "start-signal" , required_argument, NULL, 's' },
         { NULL, 0, NULL, 0 },
     };
 
@@ -493,6 +495,10 @@ static void parse_update_options(flatpak_t *f, int argc, char **argv)
 
         case 'i':
             parse_interval(f, optarg);
+            break;
+
+        case 's':
+            f->send_signal = parse_signal(f->argv0, optarg);
             break;
 
         case '?':

@@ -100,6 +100,8 @@ static int signal_session(flatpak_t *f)
 
 static int fetch_and_update(flatpak_t *f)
 {
+    remote_t *r;
+
     if (app_discover(f) < 0)
         return -1;
 
@@ -111,6 +113,14 @@ static int fetch_and_update(flatpak_t *f)
 
     if (app_update(f) < 0)
         return -1;
+
+    if (f->send_signal != 0) {
+        ftpk_foreach_remote(f, r) {
+            f->session_uid = r->session_uid;
+            session_signal(f);
+        }
+        f->send_signal = 0;
+    }
 
     return 0;
 }

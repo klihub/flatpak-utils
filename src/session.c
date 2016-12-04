@@ -126,17 +126,47 @@ int session_start(flatpak_t *f)
 
 int session_stop(flatpak_t *f)
 {
-    pid_t session;
+    application_t *a;
+    pid_t          session;
+    uid_t          uid;
 
-    log_info("stopping session for remote %d...", f->session_uid);
+    switch (f->command) {
+    case COMMAND_START:
+        session = getpid();
+        uid     = geteuid();
 
-    if (f->dry_run)
-        return 0;
+        log_info("stopping session (uid %u)", uid);
 
-    if (!(session = ftpk_session_pid(f->session_uid)))
-        return 0;
+        if (f->dry_run)
+            break;
 
-    kill(session, f->send_signal ? f->send_signal : SIGTERM);
+        ftpk_foreach_app(f, a) {
+            if (!a->start)
+                continue;
+
+            log_info("stopping application %s/%s", a->origin, a->name);
+
+            ftpk_signal_app(a, uid, session, SIGTERM);
+        }
+        break;
+
+    case COMMAND_STOP:
+        uid     = f->session_uid;
+        session = ftpk_session_pid(uid);
+
+        if (session != 0) {
+            log_info("stopping session for uid %u (pid %u)", uid, session);
+
+            if (f->dry_run)
+                break;
+
+            kill(session, f->send_signal ? f->send_signal : SIGTERM);
+        }
+        break;
+
+    default:
+        break;
+    }
 
     return 0;
 }
@@ -144,34 +174,50 @@ int session_stop(flatpak_t *f)
 
 int session_signal(flatpak_t *f)
 {
-    uid_t           uid = f->session_uid;
-    remote_t       *r   = remote_for_user(f, uid);
-    int             sig = f->send_signal;
-    application_t  *app;
-    int             status;
-
-    if (f->command == COMMAND_SIGNAL) {
-        log_info("sending session of %d signal #%d", uid, sig);
-
-        if (f->dry_run)
-            return 0;
-        else
-            return ftpk_signal_session(uid, sig);
-    }
-
-
-    log_info("sending applications signal #%d", sig);
+    application_t *a;
+    uid_t          uid;
+    pid_t          session;
+    int            status;
 
     status = 0;
-    ftpk_foreach_app(f, app) {
-        if (remote_lookup(f, app->origin) != r)
-            continue;
+    switch (f->command) {
+    case COMMAND_START:
+        session = getpid();
+        uid     = geteuid();
 
-        log_info("signalling application %s...", app->name);
+        log_info("signalling session (uid %u)", uid);
 
-        if (!f->dry_run)
-            if (ftpk_signal_app(app, uid, getpid(), sig) < 0)
-                status = -1;
+        if (f->dry_run)
+            break;
+
+        ftpk_foreach_app(f, a) {
+            if (!a->start)
+                continue;
+
+            log_info("signalling application %s/%s", a->origin, a->name);
+
+            if (!f->dry_run)
+                if (ftpk_signal_app(a, uid, session, f->send_signal) < 0)
+                    status = -1;
+        }
+        break;
+
+    case COMMAND_SIGNAL:
+    case COMMAND_UPDATE:
+        uid     = f->session_uid;
+        session = ftpk_session_pid(uid);
+
+        if (session != 0) {
+            log_info("signalling session for uid %u (pid %u)", uid, session);
+
+            if (!f->dry_run)
+                if (kill(session, f->send_signal) < 0)
+                    status = -1;
+        }
+        break;
+
+    default:
+        break;
     }
 
     return status;
