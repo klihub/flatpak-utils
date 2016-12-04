@@ -641,22 +641,27 @@ static void update_progress_cb(const char *status, guint progress,
 
 int ftpk_fetch_updates(flatpak_t *f, application_t *a)
 {
-    const char          *name  = a->name;
-    FlatpakRefKind       kind  = FLATPAK_REF_KIND_APP;
-    int                  flags = a->lref ? FLATPAK_UPDATE_FLAGS_NO_DEPLOY : 0;
-    GError              *e     = NULL;
-    FlatpakInstalledRef *upd;
+    const char          *origin = a->origin;
+    const char          *name   = a->name;
+    FlatpakRefKind       kind   = FLATPAK_REF_KIND_APP;
+    int                  flags  = a->lref ? FLATPAK_UPDATE_FLAGS_NO_DEPLOY : 0;
+    GError              *e      = NULL;
+    FlatpakInstalledRef *u;
 
     if (f->dry_run)
         return 0;
 
-    upd = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
-                                      update_progress_cb, a, NULL, &e);
+    if (a->lref)
+        u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
+                                        update_progress_cb, a, NULL, &e);
+    else
+        u = flatpak_installation_install(f->f, origin, kind, name, NULL, NULL,
+                                         update_progress_cb, a, NULL, &e);
 
-    if (upd == NULL && e->code != 0)
+    if (u == NULL && e->code != 0)
         goto fetch_failed;
 
-    if (upd == NULL || (a->lref != NULL && upd == a->lref))
+    if (u == NULL || (a->lref != NULL && u == a->lref))
         return 0;
     else {
         /*
@@ -743,6 +748,9 @@ int ftpk_update_app(flatpak_t *f, application_t *a)
 
         metadata_free(a->meta);
         a->meta = metadata_load(a->lref);
+
+        g_object_unref(a->rref);
+        a->rref = NULL;
 
         return 1;
     }
