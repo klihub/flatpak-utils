@@ -153,7 +153,7 @@ int ftpk_discover_remotes(flatpak_t *f)
             continue;
         }
 
-        if (flatpak_remote_get_gpg_verify(rem) && f->gpg_verify) {
+        if (!flatpak_remote_get_gpg_verify(rem) && f->gpg_verify) {
             log_warning("remote %s: can't be GPG-verified", name);
             continue;
         }
