@@ -284,14 +284,10 @@ int fs_scan_proc(const char *exe, uid_t uid,
         return -1;
 
     while ((de = readdir(dp)) != NULL) {
-        printf("got dir entry '%s'...\n", de->d_name);
-
         if (!('0' <= de->d_name[0] && de->d_name[0] <= '9'))
             continue;
 
         snprintf(file, sizeof(file), "/proc/%s/exe", de->d_name);
-
-        printf("checking %s...\n", file);
 
         if (lstat(file, &st) != 0)
             continue;
@@ -299,14 +295,10 @@ int fs_scan_proc(const char *exe, uid_t uid,
         if (uid != (uid_t)-1 && st.st_uid != uid)
             continue;
 
-        printf("user check ok\n");
-
         if ((n = readlink(file, file, sizeof(file))) < 0)
             continue;
 
         file[n] = '\0';
-
-        printf("exe points to %s...\n", file);
 
         if (exe[0] == '/') {
             bin = file;
@@ -318,12 +310,8 @@ int fs_scan_proc(const char *exe, uid_t uid,
                 bin = file;
         }
 
-        printf("exe: '%s', bin: '%s'\n", exe, bin);
-
         if (!strcmp(exe, bin)) {
             status = cb((pid_t)strtoul(de->d_name, NULL, 10), user_data);
-
-            printf("pid_check status for %s: %d\n", de->d_name, status);
 
             if (status == 0)
                 break;
@@ -334,8 +322,6 @@ int fs_scan_proc(const char *exe, uid_t uid,
     }
 
     closedir(dp);
-
-    printf("fs scan done\n");
 
     return 0;
 
