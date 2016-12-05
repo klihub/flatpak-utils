@@ -142,6 +142,7 @@ typedef struct {
     const char    *name;                 /* remote name */
     const char    *url;                  /* repository URL */
     uid_t          session_uid;          /* associated user for session */
+    int            urgent : 1;           /* urgent updates downloaded */
 } remote_t;
 
 /* an installed application */

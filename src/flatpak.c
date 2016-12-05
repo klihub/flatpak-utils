@@ -462,6 +462,8 @@ int ftpk_discover_updates(flatpak_t *f)
         if (arr == NULL && e != NULL && e->code != 0)
             goto query_failed;
 
+        r->urgent = 0;
+
         for (i = 0; i < (int)arr->len; i++) {
             rref   = g_ptr_array_index(arr, i);
             origin = r->name;
@@ -506,6 +508,10 @@ int ftpk_discover_updates(flatpak_t *f)
 
                 log_info("app %s/%s: pending update (urgency: %s)",
                          a->origin, a->name, a->urgency);
+
+                if (!strcmp(a->urgency, "important") ||
+                    !strcmp(a->urgency, "critical"))
+                    r->urgent = 1;
             }
         }
 

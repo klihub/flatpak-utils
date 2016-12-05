@@ -114,12 +114,10 @@ static int fetch_and_update(flatpak_t *f)
     if (app_update(f) < 0)
         return -1;
 
-    if (f->send_signal != 0) {
-        ftpk_foreach_remote(f, r) {
-            f->session_uid = r->session_uid;
-            session_signal(f);
-        }
-        f->send_signal = 0;
+    ftpk_foreach_remote(f, r) {
+        f->session_uid = r->session_uid;
+        f->send_signal = r->urgent ? SIGURG : SIGHUP;
+        session_signal(f);
     }
 
     return 0;
@@ -137,7 +135,7 @@ static void sighandler(flatpak_t *f, int signum)
             return;
         }
         else {
-            f->send_signal = signum;
+            f->send_signal = signum != SIGURG ? signum : SIGTERM;
             signal_session(f);
         }
     }
@@ -159,6 +157,8 @@ static void sighandler(flatpak_t *f, int signum)
     case SIGURG:
         if (f->command == COMMAND_UPDATE)
             fetch_and_update(f);
+        if (f->restart_status != 0)
+            exit(f->restart_status);
         break;
 
     default:
