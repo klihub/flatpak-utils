@@ -836,7 +836,7 @@ pid_t ftpk_session_pid(uid_t uid)
 int ftpk_signal_app(application_t *a, uid_t uid, pid_t session, int sig)
 {
     char  tasks[PATH_MAX], scope[PATH_MAX], exe[PATH_MAX], lnk[PATH_MAX];
-    char  task[32], *base;
+    char  task[32];
     pid_t pid;
     FILE *fp;
     int   n, status;
@@ -856,6 +856,7 @@ int ftpk_signal_app(application_t *a, uid_t uid, pid_t session, int sig)
     status = 0;
     while (fgets(task, sizeof(task), fp) != NULL) {
         pid = strtoul(task, NULL, 10);
+
         snprintf(lnk, sizeof(lnk), "/proc/%u/exe", (unsigned int)pid);
 
         if ((n = readlink(lnk, exe, sizeof(exe))) < 0)
@@ -863,12 +864,7 @@ int ftpk_signal_app(application_t *a, uid_t uid, pid_t session, int sig)
 
         exe[n] = '\0';
 
-        if ((base = strrchr(exe, '/')) != NULL)
-            base++;
-        else
-            base = exe;
-
-        if (!strcmp(base, FLATPAK_BWRAP))
+        if (strncmp(exe, FLATPAK_NEW_ROOT"/", sizeof(FLATPAK_NEW_ROOT)))
             continue;
 
         log_info("sending process %u (%s) signal %d...", pid, exe, sig);

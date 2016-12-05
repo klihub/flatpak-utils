@@ -69,12 +69,12 @@
 #    define SYSTEMD_USER_SLICE "/sys/fs/cgroup/systemd/user.slice"
 #endif
 
-#ifndef FLATPAK_BWRAP
-#    define FLATPAK_BWRAP "flatpak-bwrap"
-#endif
-
 #ifndef FLATPAK_SESSION_PATH
 #    define FLATPAK_SESSION_PATH "/usr/bin/flatpak-session"
+#endif
+
+#ifndef FLATPAK_NEW_ROOT
+#    define FLATPAK_NEW_ROOT "/newroot/app"
 #endif
 
 #ifndef FLATPAK_GECOS_PREFIX
