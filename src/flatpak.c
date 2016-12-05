@@ -765,17 +765,22 @@ int ftpk_update_app(flatpak_t *f, application_t *a)
 int ftpk_launch_app(flatpak_t *f, application_t *a)
 {
     GError *e;
+    int     status;
 
     if (f->dry_run)
         return 0;
 
     e = NULL;
+    sigprocmask(SIG_UNBLOCK, &f->watched, NULL);
     if (!flatpak_installation_launch(f->f, a->name, NULL, NULL, NULL, NULL, &e))
-        goto launch_failed;
+        status = -1;
+    else
+        status = 0;
+    sigprocmask(SIG_BLOCK, &f->watched, NULL);
 
-    return 0;
+    if (!status)
+        return 0;
 
- launch_failed:
     log_error("failed to launch application '%s' (%s: %d:%s).", a->name,
               g_quark_to_string(e->domain), e->code, e->message);
     return -1;
