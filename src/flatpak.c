@@ -49,7 +49,8 @@ static void remote_free(gpointer ptr)
     if (r == NULL)
         return;
 
-    g_object_unref(r->r);
+    if (r->r)
+        g_object_unref(r->r);
     free(r);
 }
 
@@ -61,8 +62,10 @@ static void app_free(gpointer ptr)
     if (a == NULL)
         return;
 
-    g_object_unref(a->lref);
-    g_object_unref(a->rref);
+    if (a->lref)
+        g_object_unref(a->lref);
+    if (a->rref)
+        g_object_unref(a->rref);
     metadata_free(a->meta);
 
     free(a);
@@ -115,7 +118,8 @@ void ftpk_reset(flatpak_t *f)
 void ftpk_exit(flatpak_t *f)
 {
     ftpk_reset(f);
-    g_object_unref(f->f);
+    if (f->f)
+        g_object_unref(f->f);
     f->f = NULL;
 }
 
@@ -497,16 +501,16 @@ int ftpk_discover_updates(flatpak_t *f)
                     goto fail;
 
                 a->rref   = g_object_ref(rref);
-                a->origin = origin;
+                a->origin = r->name;
                 a->name   = name;
                 a->meta   = meta;
 
                 log_info("app %s/%s: pending installation", a->origin, a->name);
             }
             else {
-                g_object_unref(a->rref);
+                if (a->rref)
+                    g_object_unref(a->rref);
                 a->rref    = g_object_ref(rref);
-
                 a->urgency = wants_urgency(meta);
 
                 log_info("app %s/%s: pending update (urgency: %s)",
@@ -717,7 +721,8 @@ int ftpk_apply_updates(flatpak_t *f, application_t *a)
     if (u == a->lref || u == NULL)
         return 0;
     else {
-        g_object_unref(a->lref);
+        if (a->lref)
+            g_object_unref(a->lref);
         a->lref = g_object_ref(u);
 
         metadata_free(a->meta);
@@ -753,13 +758,15 @@ int ftpk_update_app(flatpak_t *f, application_t *a)
     if (u == a->lref || u == NULL)
         return 0;
     else {
-        g_object_unref(a->lref);
+        if (a->lref)
+            g_object_unref(a->lref);
         a->lref = g_object_ref(u);
 
         metadata_free(a->meta);
         a->meta = metadata_load(a->lref);
 
-        g_object_unref(a->rref);
+        if (a->rref)
+            g_object_unref(a->rref);
         a->rref = NULL;
 
         return 1;
