@@ -51,6 +51,7 @@ static void remote_free(gpointer ptr)
 
     if (r->r)
         g_object_unref(r->r);
+
     free(r);
 }
 
@@ -82,26 +83,11 @@ static int ftpk_init(flatpak_t *f)
     e    = NULL;
     f->f = flatpak_installation_new_system(NULL, &e);
 
-    if (f->f == NULL)
-        goto fail;
+    if (f->f != NULL)
+        return 0;
 
-#define r_free remote_free
-#define a_free app_free
-    f->remotes = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, r_free);
-    f->apps    = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, a_free);
-#undef r_free
-#undef a_free
-
-    if (f->remotes == NULL || f->apps == NULL)
-        goto fail;
-
-    return 0;
-
- fail:
     log_error("flatpak library failed to initialize (%s: %d: %s)",
-              e ? g_quark_to_string(e->domain) : "libc",
-              e ? e->code                      : errno,
-              e ? e->message                   : strerror(errno));
+              g_quark_to_string(e->domain), e->code, e->message);
     ftpk_exit(f);
 
     return -1;
@@ -110,17 +96,23 @@ static int ftpk_init(flatpak_t *f)
 
 void ftpk_reset(flatpak_t *f)
 {
+    GError *e;
+
     ftpk_forget_remotes(f);
     ftpk_forget_apps(f);
+
+    e = NULL;
+    flatpak_installation_drop_caches(f->f, NULL, &e);
 }
 
 
 void ftpk_exit(flatpak_t *f)
 {
     ftpk_reset(f);
-    if (f->f)
+    if (f->f) {
         g_object_unref(f->f);
-    f->f = NULL;
+        f->f = NULL;
+    }
 }
 
 
@@ -138,6 +130,12 @@ int ftpk_discover_remotes(flatpak_t *f)
         return 0;
 
     if (ftpk_init(f) < 0)
+        return -1;
+
+    f->remotes = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                       NULL, remote_free);
+
+    if (f->remotes == NULL)
         return -1;
 
     r   = NULL;
@@ -196,6 +194,7 @@ int ftpk_discover_remotes(flatpak_t *f)
  fail:
     g_ptr_array_unref(arr);
     remote_free(r);
+    ftpk_forget_remotes(f);
 
     return -1;
 }
@@ -203,9 +202,6 @@ int ftpk_discover_remotes(flatpak_t *f)
 
 void ftpk_forget_remotes(flatpak_t *f)
 {
-    if (f == NULL)
-        return;
-
     g_hash_table_destroy(f->remotes);
     f->remotes = NULL;
 }
@@ -213,7 +209,7 @@ void ftpk_forget_remotes(flatpak_t *f)
 
 remote_t *ftpk_lookup_remote(flatpak_t *f, const char *name)
 {
-    return f && f->remotes ? g_hash_table_lookup(f->remotes, name) : NULL;
+    return f->remotes ? g_hash_table_lookup(f->remotes, name) : NULL;
 }
 
 
@@ -378,6 +374,12 @@ int ftpk_discover_apps(flatpak_t *f)
     if (ftpk_discover_remotes(f) < 0)
         return -1;
 
+    f->apps = g_hash_table_new_full(g_str_hash, g_str_equal,
+                                    NULL, app_free);
+
+    if (f->apps == NULL)
+        return -1;
+
     knd = FLATPAK_REF_KIND_APP;
     e   = NULL;
     arr = flatpak_installation_list_installed_refs_by_kind(f->f, knd, NULL, &e);
@@ -435,6 +437,7 @@ int ftpk_discover_apps(flatpak_t *f)
  fail:
     g_ptr_array_unref(arr);
     app_free(a);
+    ftpk_forget_apps(f);
 
     return -1;
 }
@@ -541,9 +544,6 @@ int ftpk_discover_updates(flatpak_t *f)
 
 void ftpk_forget_apps(flatpak_t *f)
 {
-    if (f == NULL)
-        return;
-
     g_hash_table_destroy(f->apps);
     f->apps = NULL;
 }

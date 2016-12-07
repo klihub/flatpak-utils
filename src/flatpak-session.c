@@ -98,7 +98,7 @@ static int signal_session(flatpak_t *f)
 }
 
 
-static int fetch_and_update(flatpak_t *f)
+static int update_apps(flatpak_t *f)
 {
     remote_t *r;
 
@@ -156,7 +156,7 @@ static void sighandler(flatpak_t *f, int signum)
 
     case SIGURG:
         if (f->command == COMMAND_UPDATE)
-            fetch_and_update(f);
+            update_apps(f);
         if (f->restart_status != 0)
             exit(f->restart_status);
         break;
@@ -188,7 +188,7 @@ static void monitor_cb(flatpak_t *f)
         return;
 
     f->updating = 1;
-    fetch_and_update(f);
+    update_apps(f);
     f->updating = 0;
 }
 
@@ -215,7 +215,7 @@ int main(int argc, char **argv)
     case COMMAND_START:    start_session(&f);     break;
     case COMMAND_STOP:     stop_session(&f);      break;
     case COMMAND_SIGNAL:   signal_session(&f);    break;
-    case COMMAND_UPDATE:   fetch_and_update(&f);  break;
+    case COMMAND_UPDATE:   update_apps(&f);       break;
     default:
         log_error("internal error: unknown command");
         exit(1);
