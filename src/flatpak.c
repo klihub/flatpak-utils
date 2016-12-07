@@ -504,6 +504,9 @@ int ftpk_discover_updates(flatpak_t *f)
                 log_info("app %s/%s: pending installation", a->origin, a->name);
             }
             else {
+                g_object_unref(a->rref);
+                a->rref    = g_object_ref(rref);
+
                 a->urgency = wants_urgency(meta);
 
                 log_info("app %s/%s: pending update (urgency: %s)",
@@ -512,6 +515,7 @@ int ftpk_discover_updates(flatpak_t *f)
                 if (!strcmp(a->urgency, "important") ||
                     !strcmp(a->urgency, "critical"))
                     r->urgent = 1;
+
             }
         }
 
