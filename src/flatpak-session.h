@@ -138,23 +138,22 @@ struct flatpak_s {
 
 /* a remote repository for applications */
 typedef struct {
-    FlatpakRemote *r;                    /* flatpak remote */
+    FlatpakRemote *ref;                  /* flatpak remote reference */
     const char    *name;                 /* remote name */
-    const char    *url;                  /* repository URL */
+    const char    *url;                  /* remote repository */
     uid_t          session_uid;          /* associated user for session */
-    int            urgent : 1;           /* urgent updates downloaded */
+    int            urgent : 1;           /* urgent updates pending */
 } remote_t;
 
 /* an installed application */
 typedef struct {
-    FlatpakInstalledRef *lref;           /* flatpak application */
-    FlatpakRemoteRef    *rref;           /* pending update/installation */
-    const char          *origin;         /* remote name */
-    const char          *name;           /* application name */
-    GKeyFile            *meta;           /* application metadata */
-    const char          *urgency;        /* update urgency */
-    int                  start : 1;      /* start automatically */
+    FlatpakInstalledRef *ref;            /* flatpak application reference */
+    char                *origin;         /* originating remote */
+    char                *name;           /* application name */
+    char                *commit;         /* current HEAD */
     int                  updates : 1;    /* pending updates */
+    int                  urgent : 1;     /* urgent updates */
+    int                  start : 1;      /* start automatically */
 } application_t;
 
 
@@ -196,6 +195,7 @@ void mainloop_disable_monitor(flatpak_t *f);
 
 
 /* flatpak.c */
+int ftpk_init(flatpak_t *f);
 void ftpk_exit(flatpak_t *f);
 int ftpk_discover_remotes(flatpak_t *f);
 int ftpk_discover_apps(flatpak_t *f);

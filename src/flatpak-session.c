@@ -108,9 +108,6 @@ static int update_apps(flatpak_t *f)
     if (app_discover_updates(f) < 0)
         return -1;
 
-    if (app_fetch(f) < 0)
-        return -1;
-
     if (app_update(f) < 0)
         return -1;
 

@@ -57,45 +57,18 @@ application_t *app_lookup(flatpak_t *f, const char *name)
 }
 
 
-int app_fetch(flatpak_t *f)
-{
-    application_t *app;
-    int            status;
-
-    status = 0;
-
-    ftpk_foreach_app(f, app) {
-        if (app->rref == NULL)
-            continue;
-        if (app->lref != NULL)
-            log_info("fetching updates for application %s/%s...",
-                     app->origin, app->name);
-        else
-            log_info("installing application %s/%s...", app->origin, app->name);
-
-        switch (ftpk_fetch_updates(f, app)) {
-        case 0:  log_info("no pending updates"); break;
-        case 1:  log_info("updates fetched");    break;
-        default: status = -1;                    break;
-        }
-    }
-
-    return status;
-}
-
-
 int app_update(flatpak_t *f)
 {
-    application_t *app;
+    application_t *a;
     int            status;
 
     status = 0;
 
-    ftpk_foreach_app(f, app) {
+    ftpk_foreach_app(f, a) {
         log_info("applying updates for application %s/%s...",
-                 app->origin, app->name);
+                 a->origin, a->name);
 
-        switch (ftpk_apply_updates(f, app)) {
+        switch (ftpk_update_app(f, a)) {
         case 0:  log_info("no updates"); break;
         case 1:  log_info("updated");    break;
         default: status = -1;            break;
