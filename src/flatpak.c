@@ -217,7 +217,7 @@ static void app_free(gpointer ptr)
     if (a->ref)
         g_object_unref(a->ref);
 
-    free(a->commit);
+    free(a->head);
     free(a->origin);
     free(a->name);
 
@@ -419,9 +419,9 @@ int ftpk_discover_apps(flatpak_t *f)
         a->ref    = g_object_ref(ref);
         a->origin = strdup(origin);
         a->name   = strdup(name);
-        a->commit = strdup(flatpak_ref_get_commit(FLATPAK_REF(ref));
+        a->head   = strdup(flatpak_ref_get_commit(FLATPAK_REF(ref));
 
-        if (a->origin == NULL || a->name == NULL || a->commit == NULL)
+        if (a->origin == NULL || a->name == NULL || a->head == NULL)
             goto fail;
 
         if (!g_hash_table_insert(f->apps, (void *)a->name, a))
@@ -567,129 +567,76 @@ static void update_progress_cb(const char *status, guint progress,
 }
 
 
-int ftpk_fetch_updates(flatpak_t *f, application_t *a)
+int ftpk_update_app(flatpak_t *f, application_t *a)
 {
     const char          *origin = a->origin;
     const char          *name   = a->name;
     FlatpakRefKind       kind   = FLATPAK_REF_KIND_APP;
-    int                  flags  = a->lref ? FLATPAK_UPDATE_FLAGS_NO_DEPLOY : 0;
+    int                  flags  = FLATPAK_UPDATE_FLAGS_NONE;
+    FlatpakInstalledRef *u      = NULL;
     GError              *e      = NULL;
-    FlatpakInstalledRef *u;
+    GKeyFile            *m;
 
-    if (f->dry_run)
+    if (!a->updates)
         return 0;
 
-    if (a->lref)
+    if (a->ref != NULL)
         u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
                                         update_progress_cb, a, NULL, &e);
     else
         u = flatpak_installation_install(f->f, origin, kind, name, NULL, NULL,
                                          update_progress_cb, a, NULL, &e);
 
-    if (u == NULL && e->code != 0)
-        goto fetch_failed;
-
-    if (u == NULL || (a->lref != NULL && u == a->lref))
-        return 0;
-    else {
-        /*
-         * Unfortunately libflatpak seems to have a bug related to updates
-         * which are fetched with the NO_DEPLOY flag. While the updated
-         * FlatpakInstalledRef has correct commit info, its deploy-dir
-         * still points to the old, currently active one. This prevents us
-         * from easily (IOW using stock flatpak functions) getting to the
-         * metadata of the freshly downloaded HEAD.
-         *
-         * In practice this means that we cannot check our extra set of
-         * metadata (for instance urgency) without applying the updates
-         * first...
-         */
-        return 1;
+    if (u == NULL) {
+        if (e->code == 0)
+            return 0;
+        else
+            goto fetch_failed;
     }
 
+    if ((m = metadata_load(a->ref)) == NULL)
+        goto metadata_failed;
+
+    a->start  = get_autostart(m);
+    a->urgent = get_urgency(m);
+
+    metadata_free(m);
+
+    if (a->ref != NULL)
+        g_object_unref(a->ref);
+
+    free(a->head);
+
+    a->ref  = u;
+    a->head = strdup(flatpak_get_commit(FLATPAK_REF(a->ref)));
+
+    if (a->head == NULL)
+        goto fail;
+
+    return 1;
+
  fetch_failed:
-    log_error("failed to fetch updates for %s/%s (%s: %d: %s)",
-              a->origin, a->name,
-              g_quark_to_string(e->domain), e->code, e->message);
+    log_error("flatpak: failed to fetch/update app %s/%s (%s: %d: %s)",
+              origin, name, g_quark_to_string(e->domain), e->code,
+              e->message);
+    goto fail;
+ metadata_failed:
+    log_error("flatpak: failed to load metadata for %s/%s", origin, name);
+    g_object_unref(u);
+ fail:
     return -1;
 }
 
 
-int ftpk_apply_updates(flatpak_t *f, application_t *a)
+int ftpk_rescan_remotes(flatpak_t *f)
 {
-    const char          *name  = a->name;
-    FlatpakRefKind       kind  = FLATPAK_REF_KIND_APP;
-    int                  flags = FLATPAK_UPDATE_FLAGS_NO_PULL;
-    GError              *e     = NULL;
-    FlatpakInstalledRef *u;
-
-    if (f->dry_run)
-        return 0;
-
-    u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
-                                    update_progress_cb, a, NULL, &e);
-
-    if (u == NULL && e->code != 0)
-        goto fetch_failed;
-
-    if (u == a->lref || u == NULL)
-        return 0;
-    else {
-        if (a->lref)
-            g_object_unref(a->lref);
-        a->lref = g_object_ref(u);
-
-        metadata_free(a->meta);
-        a->meta = metadata_load(a->lref);
-
-        return 1;
-    }
-
- fetch_failed:
-    log_error("failed to fetch updates (%s: %d: %s)",
-              g_quark_to_string(e->domain), e->code, e->message);
-    return -1;
+    return 0;
 }
 
 
-int ftpk_update_app(flatpak_t *f, application_t *a)
+int ftpk_rescan_apps(flatpak_t *f)
 {
-    const char          *name  = a->name;
-    FlatpakRefKind       kind  = FLATPAK_REF_KIND_APP;
-    int                  flags = FLATPAK_UPDATE_FLAGS_NONE;
-    GError              *e     = NULL;
-    FlatpakInstalledRef *u;
-
-    if (f->dry_run)
-        return 0;
-
-    u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
-                                    update_progress_cb, a, NULL, &e);
-
-    if (u == NULL && e->code != 0)
-        goto update_failed;
-
-    if (u == a->lref || u == NULL)
-        return 0;
-    else {
-        if (a->lref)
-            g_object_unref(a->lref);
-        a->lref = g_object_ref(u);
-
-        metadata_free(a->meta);
-        a->meta = metadata_load(a->lref);
-
-        if (a->rref)
-            g_object_unref(a->rref);
-        a->rref = NULL;
-
-        return 1;
-    }
-
- update_failed:
-    log_error("update failed (%s: %d: %s)",
-              g_quark_to_string(e->domain), e->code, e->message);
-    return -1;
+    return 0;
 }
 
 

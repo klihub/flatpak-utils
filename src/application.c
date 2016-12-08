@@ -65,12 +65,14 @@ int app_update(flatpak_t *f)
     status = 0;
 
     ftpk_foreach_app(f, a) {
-        log_info("applying updates for application %s/%s...",
-                 a->origin, a->name);
+        if (!a->updates)
+            continue;
+
+        log_info("updating application %s/%s...", a->origin, a->name);
 
         switch (ftpk_update_app(f, a)) {
-        case 0:  log_info("no updates"); break;
-        case 1:  log_info("updated");    break;
+        case 0: log_info("no updates");  break;
+        case 1: log_info("updated");    break;
         default: status = -1;            break;
         }
     }

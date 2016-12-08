@@ -115,7 +115,7 @@ struct flatpak_s {
     GHashTable          *apps;           /* installed applications */
     GMainLoop           *loop;           /* main loop */
     void               (*sighandler)(flatpak_t *f, int sig);
-    sigset_t             watched;        /* signals we block */
+    sigset_t             watched;        /* signals we watch */
     int                  sfd;            /* signalfd */
     GIOChannel          *sio;            /* GIOChannel for our signalfd */
     guint                sid;            /* GIOChannel watch source id */
@@ -150,7 +150,7 @@ typedef struct {
     FlatpakInstalledRef *ref;            /* flatpak application reference */
     char                *origin;         /* originating remote */
     char                *name;           /* application name */
-    char                *commit;         /* current HEAD */
+    char                *head;           /* current HEAD */
     int                  updates : 1;    /* pending updates */
     int                  urgent : 1;     /* urgent updates */
     int                  start : 1;      /* start automatically */
@@ -205,9 +205,6 @@ application_t *ftpk_lookup_app(flatpak_t *f, const char *name);
 void ftpk_forget_remotes(flatpak_t *f);
 void ftpk_forget_apps(flatpak_t *f);
 int ftpk_launch_app(flatpak_t *f, application_t *app);
-
-int ftpk_fetch_updates(flatpak_t *f, application_t *app);
-int ftpk_apply_updates(flatpak_t *f, application_t *app);
 int ftpk_update_app(flatpak_t *f, application_t *app);
 int ftpk_signal_app(application_t *app, uid_t uid, pid_t session, int sig);
 int ftpk_stop_app(application_t *app, uid_t uid, pid_t session);
