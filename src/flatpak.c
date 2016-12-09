@@ -54,6 +54,7 @@ static GKeyFile *metadata_load(FlatpakInstalledRef *ref)
     size_t      l;
     GError     *e;
 
+    b = NULL;
     m = g_key_file_new();
 
     if (m == NULL)
@@ -100,6 +101,7 @@ static GKeyFile *metadata_fetch(flatpak_t *f, FlatpakRemoteRef *rref)
     const char *remote;
     GError     *e;
 
+    b = NULL;
     m = g_key_file_new();
 
     if (m == NULL)
@@ -110,7 +112,7 @@ static GKeyFile *metadata_fetch(flatpak_t *f, FlatpakRemoteRef *rref)
     ref = FLATPAK_REF(rref);
     e   = NULL;
     b   = flatpak_installation_fetch_remote_metadata_sync(f->f, remote, ref,
-                                                          NULL &e);
+                                                          NULL, &e);
 
     if (b == NULL)
         goto fail_no_data;
@@ -182,7 +184,7 @@ static int get_urgency(GKeyFile *m)
 {
     const char *urgency;
 
-    metadata_get(m, FLATPAK_SECTION_APP, FLATPAK_KEY_URGENCY, "none");
+    urgency = metadata_get(m, FLATPAK_SECTION_APP, FLATPAK_KEY_URGENCY, "none");
 
     if (!strcasecmp(urgency, "critical"))
         return 1;
@@ -200,8 +202,8 @@ static void remote_free(gpointer ptr)
     if (r == NULL)
         return;
 
-    if (r->ref)
-        g_object_unref(r->ref);
+    free(r->name);
+    free(r->url);
 
     free(r);
 }
@@ -214,9 +216,6 @@ static void app_free(gpointer ptr)
     if (a == NULL)
         return;
 
-    if (a->ref)
-        g_object_unref(a->ref);
-
     free(a->head);
     free(a->origin);
     free(a->name);
@@ -225,7 +224,7 @@ static void app_free(gpointer ptr)
 }
 
 
-static int ftpk_init(flatpak_t *f)
+int ftpk_init(flatpak_t *f)
 {
     GError *e = NULL;
 
@@ -265,12 +264,12 @@ void ftpk_exit(flatpak_t *f)
 
 int ftpk_discover_remotes(flatpak_t *f)
 {
-    GPtrArray     *refs;
-    GError        *e;
     remote_t      *r;
     FlatpakRemote *ref;
     const char    *name, *url;
     uid_t          uid;
+    GPtrArray     *refs;
+    GError        *e;
     int            i;
 
     if (f->remotes != NULL)
@@ -302,7 +301,7 @@ int ftpk_discover_remotes(flatpak_t *f)
             continue;
         }
 
-        if (!flatpak_remote_get_gpg_verify(rem) && f->gpg_verify) {
+        if (!flatpak_remote_get_gpg_verify(ref) && f->gpg_verify) {
             log_warning("remote %s: can't be GPG-verified, disabled", name);
             continue;
         }
@@ -313,7 +312,7 @@ int ftpk_discover_remotes(flatpak_t *f)
         }
 
         if (f->session_uid != 0 && uid != f->session_uid) {
-            log_debug("remote %s: for other session, skipped", name, uid);
+            log_debug("remote %s: for other session, skipped", name);
             continue;
         }
 
@@ -322,12 +321,11 @@ int ftpk_discover_remotes(flatpak_t *f)
         if (r == NULL)
             goto fail;
 
-        r->ref         = g_object_ref(ref);
-        r->name        = name;
-        r->url         = url;
+        r->name        = strdup(name);
+        r->url         = strdup(url);
         r->session_uid = uid;
 
-        if (!g_hash_table_insert(f->remotes, (void *)name, r))
+        if (!g_hash_table_insert(f->remotes, (void *)r->name, r))
             goto fail;
     }
 
@@ -366,7 +364,7 @@ int ftpk_discover_apps(flatpak_t *f)
     application_t       *a;
     FlatpakInstalledRef *ref;
     FlatpakRefKind       knd;
-    const char          *origin, *name;
+    const char          *origin, *name, *head;
     GKeyFile            *m;
     GPtrArray           *refs;
     GError              *e;
@@ -378,14 +376,15 @@ int ftpk_discover_apps(flatpak_t *f)
     if (ftpk_discover_remotes(f) < 0)
         return -1;
 
-    f->apps = g_hash_table_new_full(g_str_hash, g_str_equal,
-                                    NULL, app_free);
+    f->apps = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, app_free);
 
     if (f->apps == NULL)
         return -1;
 
-    e    = NULL;
-    knd  = FLATPAK_REF_KIND_APP;
+    a   = NULL;
+    e   = NULL;
+    knd = FLATPAK_REF_KIND_APP;
+
     refs = flatpak_installation_list_installed_refs_by_kind(f->f, knd, NULL, &e);
 
     if (refs == NULL)
@@ -395,9 +394,10 @@ int ftpk_discover_apps(flatpak_t *f)
         ref    = g_ptr_array_index(refs, i);
         origin = flatpak_installed_ref_get_origin(ref);
         name   = flatpak_ref_get_name(FLATPAK_REF(ref));
+        head   = flatpak_ref_get_commit(FLATPAK_REF(ref));
 
         if ((r = ftpk_lookup_remote(f, origin)) == NULL) {
-            log_debug("app %s: no remote, ignored", name);
+            log_debug("app %s: no remote (%s), ignored", name, origin);
             continue;
         }
 
@@ -416,10 +416,10 @@ int ftpk_discover_apps(flatpak_t *f)
         if (a == NULL)
             goto fail;
 
-        a->ref    = g_object_ref(ref);
         a->origin = strdup(origin);
         a->name   = strdup(name);
-        a->head   = strdup(flatpak_ref_get_commit(FLATPAK_REF(ref));
+        a->head   = strdup(head);
+        a->start  = 1;
 
         if (a->origin == NULL || a->name == NULL || a->head == NULL)
             goto fail;
@@ -465,6 +465,7 @@ int ftpk_discover_updates(flatpak_t *f)
         return -1;
 
     ftpk_foreach_remote(f, r) {
+        a      = NULL;
         m      = NULL;
         e      = NULL;
         origin = name = r->name;
@@ -475,7 +476,7 @@ int ftpk_discover_updates(flatpak_t *f)
             goto query_failed;
 
         for (i = 0; i < (int)refs->len; i++) {
-            ref  = g_ptr_array_index(arr, i);
+            ref  = g_ptr_array_index(refs, i);
             name = flatpak_ref_get_name(FLATPAK_REF(ref));
 
             if (flatpak_ref_get_kind(FLATPAK_REF(ref)) != FLATPAK_REF_KIND_APP)
@@ -496,8 +497,9 @@ int ftpk_discover_updates(flatpak_t *f)
             a = ftpk_lookup_app(f, name);
 
             if (a != NULL) {
-                a->updates = 1;
+                a->pending = 1;
                 a->urgent  = urgent;
+                a->start   = start;
             }
             else {
                 if (!install) {
@@ -511,19 +513,15 @@ int ftpk_discover_updates(flatpak_t *f)
                 if (a == NULL)
                     goto fail;
 
-                a->ref   =  g_object_ref(rref);
-                a->origin = strdup(origin);
-                a->name   = strdup(name);
+                a->pending = 1;
+                a->origin  = strdup(origin);
+                a->name    = strdup(name);
 
                 if (a->origin == NULL || a->name == NULL)
                     goto fail;
 
                 if (!g_hash_table_insert(f->apps, (void *)a->name, a))
                     goto fail;
-            }
-            else {
-                a->updates = 1;
-                a->urgent  = urgent;
             }
         }
 
@@ -577,10 +575,10 @@ int ftpk_update_app(flatpak_t *f, application_t *a)
     GError              *e      = NULL;
     GKeyFile            *m;
 
-    if (!a->updates)
+    if (!a->pending)
         return 0;
 
-    if (a->ref != NULL)
+    if (a->head != NULL)
         u = flatpak_installation_update(f->f, flags, kind, name, NULL, NULL,
                                         update_progress_cb, a, NULL, &e);
     else
@@ -594,7 +592,7 @@ int ftpk_update_app(flatpak_t *f, application_t *a)
             goto fetch_failed;
     }
 
-    if ((m = metadata_load(a->ref)) == NULL)
+    if ((m = metadata_load(u)) == NULL)
         goto metadata_failed;
 
     a->start  = get_autostart(m);
@@ -602,13 +600,9 @@ int ftpk_update_app(flatpak_t *f, application_t *a)
 
     metadata_free(m);
 
-    if (a->ref != NULL)
-        g_object_unref(a->ref);
-
     free(a->head);
 
-    a->ref  = u;
-    a->head = strdup(flatpak_get_commit(FLATPAK_REF(a->ref)));
+    a->head = strdup(flatpak_ref_get_commit(FLATPAK_REF(u)));
 
     if (a->head == NULL)
         goto fail;
@@ -630,12 +624,20 @@ int ftpk_update_app(flatpak_t *f, application_t *a)
 
 int ftpk_rescan_remotes(flatpak_t *f)
 {
+    GError *e = NULL;
+
+    flatpak_installation_drop_caches(f->f, NULL, &e);
+
     return 0;
 }
 
 
 int ftpk_rescan_apps(flatpak_t *f)
 {
+    GError *e = NULL;
+
+    flatpak_installation_drop_caches(f->f, NULL, &e);
+
     return 0;
 }
 

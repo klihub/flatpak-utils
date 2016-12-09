@@ -47,7 +47,7 @@ int app_discover_updates(flatpak_t *f)
 
 void app_forget(flatpak_t *f)
 {
-    ftpk_forget_apps(f);
+    ftpk_clear_apps(f);
 }
 
 
@@ -65,16 +65,24 @@ int app_update(flatpak_t *f)
     status = 0;
 
     ftpk_foreach_app(f, a) {
-        if (!a->updates)
+        if (!a->pending)
             continue;
 
         log_info("updating application %s/%s...", a->origin, a->name);
 
         switch (ftpk_update_app(f, a)) {
-        case 0: log_info("no updates");  break;
-        case 1: log_info("updated");    break;
-        default: status = -1;            break;
+        case 0:
+            log_info("no updates");
+            break;
+        case 1:
+            log_info("updated");
+            break;
+        default:
+            status = -1;
+            break;
         }
+
+        a->pending = 0;
     }
 
     return status;

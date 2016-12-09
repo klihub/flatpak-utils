@@ -138,22 +138,21 @@ struct flatpak_s {
 
 /* a remote repository for applications */
 typedef struct {
-    FlatpakRemote *ref;                  /* flatpak remote reference */
-    const char    *name;                 /* remote name */
-    const char    *url;                  /* remote repository */
-    uid_t          session_uid;          /* associated user for session */
-    int            urgent : 1;           /* urgent updates pending */
+    char  *name;                         /* remote name */
+    char  *url;                          /* remote repository */
+    uid_t  session_uid;                  /* associated user for session */
+    int    urgent : 1;                   /* urgent updates pending */
 } remote_t;
 
 /* an installed application */
 typedef struct {
-    FlatpakInstalledRef *ref;            /* flatpak application reference */
-    char                *origin;         /* originating remote */
-    char                *name;           /* application name */
-    char                *head;           /* current HEAD */
-    int                  updates : 1;    /* pending updates */
-    int                  urgent : 1;     /* urgent updates */
-    int                  start : 1;      /* start automatically */
+    char *origin;                        /* originating remote */
+    char *name;                          /* application name */
+    char *head;                          /* current HEAD */
+    int   pending : 1;                   /* pending updates */
+    int   updated : 1;                   /* locally updated */
+    int   urgent  : 1;                   /* update is urgent */
+    int   start   : 1;                   /* start automatically */
 } application_t;
 
 
@@ -202,8 +201,8 @@ int ftpk_discover_apps(flatpak_t *f);
 int ftpk_discover_updates(flatpak_t *f);
 remote_t *ftpk_lookup_remote(flatpak_t *f, const char *name);
 application_t *ftpk_lookup_app(flatpak_t *f, const char *name);
-void ftpk_forget_remotes(flatpak_t *f);
-void ftpk_forget_apps(flatpak_t *f);
+void ftpk_clear_remotes(flatpak_t *f);
+void ftpk_clear_apps(flatpak_t *f);
 int ftpk_launch_app(flatpak_t *f, application_t *app);
 int ftpk_update_app(flatpak_t *f, application_t *app);
 int ftpk_signal_app(application_t *app, uid_t uid, pid_t session, int sig);

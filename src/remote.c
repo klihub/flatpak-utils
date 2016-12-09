@@ -140,9 +140,9 @@ const char *remote_username(remote_t *r, char *buf, size_t size)
 const char *remote_url(remote_t *r, char *buf, size_t size)
 {
     static char  url[1024];
-    char        *p;
+    const char  *p;
 
-    p = flatpak_remote_get_url(r->r);
+    p = r->url;
 
     if (buf == NULL) {
         buf  = url;
