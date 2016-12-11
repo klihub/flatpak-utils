@@ -345,7 +345,6 @@ static void parse_start_options(flatpak_t *f, int argc, char **argv)
 {
 #   define OPTIONS "w:r:"
     static struct option options[] = {
-        { "wait-signal"   , required_argument, NULL, 'w' },
         { "restart-status", required_argument, NULL, 'r' },
         { NULL, 0, NULL, 0 },
     };
@@ -368,10 +367,6 @@ static void parse_start_options(flatpak_t *f, int argc, char **argv)
                 print_usage(argv[0], EINVAL, "invalid restart status '%s'",
                             optarg);
             }
-            break;
-
-        case 'w':
-            f->wait_signal = parse_signal(f->argv0, optarg);
             break;
 
         case '?':

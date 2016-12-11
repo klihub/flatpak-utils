@@ -61,9 +61,6 @@ static int list_sessions(flatpak_t *f)
 
 static int start_session(flatpak_t *f)
 {
-    if (f->wait_signal)
-        return 0;
-
     if (app_discover(f) < 0)
         return -1;
 
@@ -126,15 +123,8 @@ static void sighandler(flatpak_t *f, int signum)
     log_info("received signal %d (%s)", signum, strsignal(signum));
 
     if (f->command == COMMAND_START) {
-        if (signum == f->wait_signal) {
-            f->wait_signal = 0;
-            start_session(f);
-            return;
-        }
-        else {
-            f->send_signal = signum != SIGURG ? signum : SIGTERM;
-            signal_session(f);
-        }
+        f->send_signal = signum != SIGURG ? signum : SIGTERM;
+        signal_session(f);
     }
 
     switch (signum) {
@@ -172,8 +162,6 @@ static void setup_signals(flatpak_t *f)
     sigaddset(&f->watched, SIGQUIT);
     sigaddset(&f->watched, SIGTERM);
     sigaddset(&f->watched, SIGURG);
-    if (f->wait_signal)
-        sigaddset(&f->watched, f->wait_signal);
 
     mainloop_watch_signals(f, &f->watched, sighandler);
 }

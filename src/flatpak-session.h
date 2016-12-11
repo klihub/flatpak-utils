@@ -128,7 +128,6 @@ struct flatpak_s {
     const char          *service_dir;    /* systemd generator service dir. */
     uid_t                session_uid;    /* user id for session/remote */
     int                  restart_status; /* exit status for forced restart */
-    int                  wait_signal;    /* signal to wait for before start */
     int                  send_signal;    /* signal to send to session */
     int                  poll_interval;  /* update polling interval */
     int                  dry_run : 1;    /* don't perform, just show actions */
