@@ -89,7 +89,6 @@
 #define FLATPAK_KEY_NAME       "name"
 #define FLATPAK_SECTION_REFKIT "Application"
 #define FLATPAK_KEY_START      "X-Start"
-#define FLATPAK_KEY_INSTALL    "X-Install"
 #define FLATPAK_KEY_URGENCY    "X-Urgency"
 
 /* mark unused arguments and silence the compiler about them */
@@ -111,6 +110,10 @@ typedef struct flatpak_s flatpak_t;
 
 struct flatpak_s {
     FlatpakInstallation *f;              /* flatpak (system) context */
+    GFileMonitor        *fm;             /* flatpak file monitor */
+    void               (*fmcb)(flatpak_t *);
+    int                  fmc;            /* monitor connection id */
+    unsigned int         fmt;            /* monitor timer id */
     GHashTable          *remotes;        /* remotes for applications */
     GHashTable          *apps;           /* installed applications */
     GMainLoop           *loop;           /* main loop */
@@ -190,11 +193,21 @@ int mainloop_watch_signals(flatpak_t *f, sigset_t *ss,
 void mainloop_ditch_signals(flatpak_t *f);
 int mainloop_enable_monitor(flatpak_t *f, void (*cb)(flatpak_t *));
 void mainloop_disable_monitor(flatpak_t *f);
-
+unsigned int mainloop_add_timer(flatpak_t *f, int msec, int (*cb)(void *));
+void mainloop_del_timer(flatpak_t *f, unsigned int id);
 
 /* flatpak.c */
+#if 0
+int ftpk_init(flatpak_t *f, uid_t remote, void (*remote_cb)(flatpak_t *),
+              void (*local_cb)(flatpak_t *));
+#endif
+
+
 int ftpk_init(flatpak_t *f);
 void ftpk_exit(flatpak_t *f);
+
+
+
 int ftpk_discover_remotes(flatpak_t *f);
 int ftpk_discover_apps(flatpak_t *f);
 int ftpk_discover_updates(flatpak_t *f);
@@ -202,6 +215,7 @@ remote_t *ftpk_lookup_remote(flatpak_t *f, const char *name);
 application_t *ftpk_lookup_app(flatpak_t *f, const char *name);
 void ftpk_clear_remotes(flatpak_t *f);
 void ftpk_clear_apps(flatpak_t *f);
+int ftpk_monitor_updates(flatpak_t *f, void (*cb)(flatpak_t *));
 int ftpk_launch_app(flatpak_t *f, application_t *app);
 int ftpk_update_app(flatpak_t *f, application_t *app);
 int ftpk_signal_app(application_t *app, uid_t uid, pid_t session, int sig);

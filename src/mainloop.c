@@ -191,3 +191,18 @@ void mainloop_disable_monitor(flatpak_t *f)
     f->mid     = 0;
     f->monitor = NULL;
 }
+
+
+unsigned int mainloop_add_timer(flatpak_t *f, int msec, int (*cb)(void *))
+{
+    return g_timeout_add(msec, cb, f);
+}
+
+
+void mainloop_del_timer(flatpak_t *f, unsigned int id)
+{
+    UNUSED_ARG(f);
+
+    if (id > 0)
+        g_source_remove(id);
+}

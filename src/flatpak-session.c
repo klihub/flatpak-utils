@@ -128,18 +128,18 @@ static void sighandler(flatpak_t *f, int signum)
     }
 
     switch (signum) {
-        case SIGHUP:
-            if (f->restart_status != 0)
-                exit(f->restart_status);
-            break;
+    case SIGHUP:
+        if (f->restart_status != 0)
+            exit(f->restart_status);
+        break;
 
-        case SIGINT:
-            mainloop_quit(f, 0);
-            break;
+    case SIGINT:
+        mainloop_quit(f, 0);
+        break;
 
-        case SIGTERM:
-            mainloop_quit(f, 0);
-            break;
+    case SIGTERM:
+        mainloop_quit(f, 0);
+        break;
 
     case SIGURG:
         if (f->command == COMMAND_UPDATE)
@@ -167,6 +167,14 @@ static void setup_signals(flatpak_t *f)
 }
 
 
+static void local_updates(flatpak_t *f)
+{
+    UNUSED_ARG(f);
+
+    printf("local updates...\n");
+}
+
+
 static void monitor_cb(flatpak_t *f)
 {
     if (f->updating)
@@ -182,6 +190,9 @@ static void setup_monitor(flatpak_t *f)
 {
     if (f->poll_interval > 0)
         mainloop_enable_monitor(f, monitor_cb);
+
+    if (ftpk_monitor_updates(f, local_updates) < 0)
+        log_error("failed to set up monitor for local updates...");
 }
 
 

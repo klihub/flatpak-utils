@@ -168,12 +168,6 @@ static int metadata_bool(GKeyFile *m, const char *sec, const char *key, int def)
 }
 
 
-static int get_autoinstall(GKeyFile *m)
-{
-    return metadata_bool(m, FLATPAK_SECTION_APP, FLATPAK_KEY_INSTALL, 1);
-}
-
-
 static int get_autostart(GKeyFile *m)
 {
     return metadata_bool(m, FLATPAK_SECTION_APP, FLATPAK_KEY_START, 1);
@@ -456,7 +450,7 @@ int ftpk_discover_updates(flatpak_t *f)
     GKeyFile         *m;
     GPtrArray        *refs;
     GError           *e;
-    int               install, start, urgent, i;
+    int               start, urgent, i;
 
     if (ftpk_init(f) < 0)
         return -1;
@@ -488,7 +482,6 @@ int ftpk_discover_updates(flatpak_t *f)
                 continue;
             }
 
-            install = get_autoinstall(m);
             start   = get_autostart(m);
             urgent  = get_urgency(m);
 
@@ -502,12 +495,6 @@ int ftpk_discover_updates(flatpak_t *f)
                 a->start   = start;
             }
             else {
-                if (!install) {
-                    log_warning("app %s/%s: not autoinstalled, skipping",
-                                origin, name);
-                    continue;
-                }
-
                 a = calloc(1, sizeof(*a));
 
                 if (a == NULL)
@@ -546,6 +533,68 @@ void ftpk_clear_apps(flatpak_t *f)
     g_hash_table_destroy(f->apps);
     f->apps = NULL;
 }
+
+
+static gboolean changed_timer(gpointer ptr)
+{
+    flatpak_t *f = ptr;
+
+    mainloop_del_timer(f, f->fmt);
+    f->fmt = 0;
+    f->fmcb(f);
+
+    return G_SOURCE_REMOVE;
+}
+
+
+static void changed_filter(GFileMonitor *m, GFile *file, GFile *other,
+                          GFileMonitorEvent e, gpointer user_data)
+{
+    flatpak_t *f = user_data;
+
+    UNUSED_ARG(m);
+    UNUSED_ARG(file);
+    UNUSED_ARG(other);
+    UNUSED_ARG(e);
+
+    printf("(filtered) local updates...\n");
+
+    mainloop_del_timer(f, f->fmt);
+    f->fmt = mainloop_add_timer(f, 15 * 1000, changed_timer);
+}
+
+
+int ftpk_monitor_updates(flatpak_t *f, void (*cb)(flatpak_t *))
+{
+    GError *e = NULL;
+
+    if (f->fmc != 0)
+        goto alreadyset;
+
+    if (f->fm == NULL) {
+        f->fm = flatpak_installation_create_monitor(f->f, NULL, &e);
+
+        if (f->fm == NULL)
+            goto monitor_failed;
+    }
+
+    f->fmc = g_signal_connect(f->fm, "changed", G_CALLBACK(changed_filter), f);
+
+    if (f->fmc <= 0)
+        goto connect_failed;
+
+    f->fmcb = cb;
+
+    return 0;
+
+ monitor_failed:
+    log_error("flatpak: failed to create file monitor (%s: %d: %s)",
+              g_quark_to_string(e->domain), e->code, e->message);
+ connect_failed:
+ alreadyset:
+    return -1;
+}
+
 
 
 application_t *ftpk_lookup_app(flatpak_t *f, const char *name)
@@ -619,16 +668,6 @@ int ftpk_update_app(flatpak_t *f, application_t *a)
     g_object_unref(u);
  fail:
     return -1;
-}
-
-
-int ftpk_rescan_remotes(flatpak_t *f)
-{
-    GError *e = NULL;
-
-    flatpak_installation_drop_caches(f->f, NULL, &e);
-
-    return 0;
 }
 
 
