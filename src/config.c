@@ -208,6 +208,9 @@ static void parse_command(flatpak_t *f, int argc, char **argv)
 {
     const char *command;
 
+    if (f->command == COMMAND_GENERATE)
+        return;
+
     if (optind >= argc)
         return;
 
