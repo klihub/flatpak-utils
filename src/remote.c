@@ -35,121 +35,76 @@
 #include "flatpak-session.h"
 
 
-static inline int check_gecos(const char *gecos, const char *usr)
+static int chkgecos(const char *gecos, const char *remote)
 {
-    const char *prefix = FLATPAK_GECOS_PREFIX;
-    int         size   = sizeof(FLATPAK_GECOS_PREFIX) - 1;
+    const char *prefix = FPAK_GECOS_PREFIX;
+    int         len    = sizeof(FPAK_GECOS_PREFIX) - 1;
 
-    return !strncmp(gecos, prefix, size) && !strcmp(gecos + size, usr);
+    return !strncmp(gecos, prefix, len) && !strcmp(gecos + len, remote);
 }
 
 
-static uid_t search_user(const char *remote, char *usrbuf, size_t size)
+static uid_t search_passwd(const char *remote, char *buf, size_t size)
 {
-    struct passwd *pwd, ent;
-    char           buf[1024];
+    struct passwd *pwd;
 
     setpwent();
+    while ((pwd = getpwent()) != NULL) {
+        if (chkgecos(pwd->pw_gecos, remote)) {
+            if (buf != NULL) {
+                strncpy(buf, pwd->pw_name, size - 1);
+                buf[size - 1] = '\0';
+            }
 
-    while (getpwent_r(&ent, buf, sizeof(buf), &pwd) == 0) {
-        if (!check_gecos(pwd->pw_gecos, remote))
-            continue;
-
-        if (usrbuf != NULL) {
-            strncpy(usrbuf, pwd->pw_name, size - 1);
-            usrbuf[size - 1] = '\0';
+            return pwd->pw_uid;
         }
-
-        return pwd->pw_uid;
     }
+    endpwent();
 
-    return (uid_t)-1;
+    return INVALID_UID;
 }
 
 
-uid_t remote_resolve_user(const char *remote, char *usrbuf, size_t size)
+uid_t remote_user_id(const char *remote, char *buf, size_t size)
 {
-    struct passwd *pwd, ent;
-    char           buf[1024];
+    struct passwd *pwd;
 
-    if (usrbuf != NULL)
-        *usrbuf = '\0';
+    if (buf != NULL)
+        *buf = '\0';
 
-    if (getpwnam_r(remote, &ent, buf, sizeof(buf), &pwd) == 0 && pwd != NULL) {
-        if (check_gecos(pwd->pw_gecos, pwd->pw_name)) {
-            if (usrbuf != NULL) {
-                strncpy(usrbuf, pwd->pw_name, size - 1);
-                usrbuf[size -1] = '\0';
+    if ((pwd = getpwnam(remote)) != NULL) {
+        if (chkgecos(pwd->pw_gecos, remote)) {
+            if (buf != NULL) {
+                strncpy(buf, pwd->pw_name, size - 1);
+                buf[size - 1] = '\0';
             }
 
             return pwd->pw_uid;
         }
     }
 
-    return search_user(remote, usrbuf, size);
+    return search_passwd(remote, buf, size);
 }
 
 
-int remote_discover(flatpak_t *f)
+char *remote_user_name(uid_t uid, char *buf, size_t size)
 {
-    return ftpk_discover_remotes(f);
-}
+    static char    usr[64], *name;
+    struct passwd *pwd;
 
-
-remote_t *remote_lookup(flatpak_t *f, const char *name)
-{
-    return ftpk_lookup_remote(f, name);
-}
-
-
-remote_t *remote_for_user(flatpak_t *f, uid_t uid)
-{
-    remote_t *r;
-
-    ftpk_foreach_remote(f, r) {
-        if (r->session_uid == uid)
-            return r;
+    if (buf != NULL)
+        *buf = '\0';
+    else {
+        buf  = usr;
+        size = sizeof(usr);
     }
 
-    return NULL;
-}
+    if ((pwd = getpwuid(uid)) != NULL)
+        name = pwd->pw_name;
+    else
+        name = "<unknown>";
 
-
-const char *remote_username(remote_t *r, char *buf, size_t size)
-{
-    static char    user[256];
-    struct passwd *pw;
-
-    if (buf == NULL) {
-        buf  = user;
-        size = sizeof(user);
-    }
-
-    pw = getpwuid(r->session_uid);
-
-    if (pw == NULL)
-        return NULL;
-
-    strncpy(buf, pw->pw_name, size - 1);
-    buf[size - 1] = '\0';
-
-    return buf;
-}
-
-
-const char *remote_url(remote_t *r, char *buf, size_t size)
-{
-    static char  url[1024];
-    const char  *p;
-
-    p = r->url;
-
-    if (buf == NULL) {
-        buf  = url;
-        size = sizeof(url);
-    }
-
-    strncpy(buf, p, size - 1);
+    strncpy(buf, name, size - 1);
     buf[size - 1] = '\0';
 
     return buf;

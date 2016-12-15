@@ -31,12 +31,13 @@
 #define __FLATPAK_SESSION_H__
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <flatpak/flatpak.h>
 
 #include "config.h"
 
-/* default path definitions */
+/* default system path definitions */
 #ifndef SYSCONFDIR
 #    define SYSCONFDIR "/etc"
 #endif
@@ -53,225 +54,219 @@
 #    define SYSTEMD_SERVICEDIR LIBDIR"/systemd/system"
 #endif
 
-#ifndef FLATPAK_SESSION
-#    define FLATPAK_SESSION "flatpak-session@.service"
+/* default systemd service, target, and generator */
+#ifndef FPAK_SYSTEMD_SESSION
+#    define FPAK_SYSTEMD_SESSION "flatpak-session@.service"
 #endif
 
-#ifndef FLATPAK_TARGET
-#    define FLATPAK_TARGET "flatpak-sessions.target"
+#ifndef FPAK_SYSTEMD_TARGET
+#    define FPAK_SYSTEMD_TARGET "flatpak-sessions.target"
 #endif
 
-#ifndef SYSTEMD_GENERATOR
-#    define SYSTEMD_GENERATOR "flatpak-session-enable"
+#ifndef FPAK_SYSTEMD_GENERATOR
+#    define FPAK_SYSTEMD_GENERATOR "flatpak-session-enable"
 #endif
 
+/* flatpak session binary path */
+#ifndef FPAK_SESSION_PATH
+#    define FPAK_SESSION_PATH "/usr/bin/flatpak-session"
+#endif
+
+/* default path to systemd user slice top directory */
 #ifndef SYSTEMD_USER_SLICE
 #    define SYSTEMD_USER_SLICE "/sys/fs/cgroup/systemd/user.slice"
 #endif
 
-#ifndef FLATPAK_SESSION_PATH
-#    define FLATPAK_SESSION_PATH "/usr/bin/flatpak-session"
+/* root directory used by flatpak in application-specific namespaces */
+#ifndef FLATPAK_APP_ROOT
+#    define FLATPAK_APP_ROOT "/newroot/app"
 #endif
 
-#ifndef FLATPAK_NEW_ROOT
-#    define FLATPAK_NEW_ROOT "/newroot/app"
+/* gecos prefix we look for to identify remote-specific users */
+#ifndef FPAK_GECOS_PREFIX
+#    define FPAK_GECOS_PREFIX "flatpak user for "
 #endif
 
-#ifndef FLATPAK_GECOS_PREFIX
-#    define FLATPAK_GECOS_PREFIX "flatpak user for "
-#endif
+/* section and key names for our extra flatpak metadata */
+#define FPAK_SECTION_REFKIT "Application"  /* reuse existing section */
+#define FPAK_KEY_INSTALL    "X-Install"    /* autoinstall application */
+#define FPAK_KEY_START      "X-Start"      /* autostart application */
+#define FPAK_KEY_URGENCY    "X-Urgency"    /* update urgency */
 
-#ifndef FLATPAK_POLL_MIN_INTERVAL
-#    define FLATPAK_POLL_MIN_INTERVAL /*(5 * 60)*/ 15
-#endif
+/* timers, intervals */
+#define FPAK_UPDATE_LOWPASS_TIMER 15       /* update monitor lowpass filter */
+#define FPAK_POLL_MIN_INTERVAL    15       /* minimum polling interval */
 
-#define FLATPAK_SECTION_APP    "Application"
-#define FLATPAK_KEY_NAME       "name"
-#define FLATPAK_SECTION_REFKIT "Application"
-#define FLATPAK_KEY_START      "X-Start"
-#define FLATPAK_KEY_URGENCY    "X-Urgency"
+/* forward declaration of types */
+typedef struct context_s     context_t;
+typedef struct remote_s      remote_t;
+typedef struct application_s application_t;
 
-/* mark unused arguments and silence the compiler about them */
-#define UNUSED_ARG(arg) (void)arg
-
-/* commands/modes of operation */
+/* actions (modes of operation) */
 typedef enum {
-    COMMAND_UNKNOWN = -1,
-    COMMAND_GENERATE,                    /* generate a systemd session */
-    COMMAND_START,                       /* start flatpaks for a session */
-    COMMAND_STOP,                        /* stop flatpaks for a session */
-    COMMAND_LIST,                        /* list sessions, users and flatpaks */
-    COMMAND_SIGNAL,                      /* signal a flatpak session */
-    COMMAND_UPDATE,                      /* fetch updates and apply them */
-} command_t;
+    ACTION_UNKNOWN = -1,
+    ACTION_GENERATE,                 /* generate systemd services for remotes */
+    ACTION_UPDATE,                   /* update flatpaks managed by us */
+    ACTION_START,                    /* start flatpaks for/in a session */
+    ACTION_STOP,                     /* stop flatpaks for/in a session */
+    ACTION_SIGNAL,                   /* signal flatpaks in a session */
+    ACTION_LIST,                     /* list flatpaks */
+} action_t;
 
-/* runtime context */
-typedef struct flatpak_s flatpak_t;
+struct context_s {
+    FlatpakInstallation *f;          /* flatpak (system) context */
+    remote_t            *remotes;    /* remotes of interest */
+    int                  nremote;    /* number of remotes */
+    application_t       *apps;       /* flatpaks (applications) of interest */
+    int                  napp;       /* number of flatpaks */
+    GMainLoop           *ml;         /* main loop, if we need one */
+    GFileMonitor        *lm;         /* flatpak monitor for local changes */
+    int                  lmcn;       /*     monitor gobject connection */
+    unsigned int         lmlpt;      /*     monitor lowpass filter timer */
+    unsigned int         rpt;        /* remote polling timer */
+    sigset_t             signals;    /* signals we catch */
+    int                  sigfd;      /* signalfd */
+    GIOChannel          *sigio;      /* I/O channel for sigfd */
+    guint                sigw;       /* watch source id for sigio */
+    int                  exit_code;  /* status to exit with */
 
-struct flatpak_s {
-    FlatpakInstallation *f;              /* flatpak (system) context */
-    GFileMonitor        *fm;             /* flatpak file monitor */
-    void               (*fmcb)(flatpak_t *);
-    int                  fmc;            /* monitor connection id */
-    unsigned int         fmt;            /* monitor timer id */
-    GHashTable          *remotes;        /* remotes for applications */
-    GHashTable          *apps;           /* installed applications */
-    GMainLoop           *loop;           /* main loop */
-    void               (*sighandler)(flatpak_t *f, int sig);
-    sigset_t             watched;        /* signals we watch */
-    int                  sfd;            /* signalfd */
-    GIOChannel          *sio;            /* GIOChannel for our signalfd */
-    guint                sid;            /* GIOChannel watch source id */
-    void               (*monitor)(flatpak_t *f);
-    guint                mid;            /* monitoring timer source id */
-    int                  exit_code;      /* exit code to exit with */
-    /* things coming from command line/configuration */
-    const char          *argv0;          /* us, our binary... */
-    command_t            command;        /* action to perform */
-    const char          *service_dir;    /* systemd generator service dir. */
-    uid_t                session_uid;    /* user id for session/remote */
-    int                  restart_status; /* exit status for forced restart */
-    int                  send_signal;    /* signal to send to session */
-    int                  poll_interval;  /* update polling interval */
-    int                  dry_run : 1;    /* don't perform, just show actions */
-    int                  gpg_verify : 1; /* ignore unverifiable remotes */
-    int                  updating : 1;   /* busy fetching/applying updates */
+    struct {                         /* various notification callbacks */
+        void (*r_up)(context_t *c);  /*   remote updates available */
+        void (*l_up)(context_t *c);  /*   local updates available */
+    } notify;
+
+    /* configuration/command line */
+    const char *argv0;               /* our binary */
+    action_t    action;              /* action/mode we're running in */
+    const char *service_dir;         /* systemd generator output directory */
+    int         forced_restart;      /* exit status for forced restart */
+    uid_t       remote_uid;          /* remote to stop/signal session for */
+    int         poll_interval;       /* remote monitor polling interval */
+    int         signal;              /* signal to send */
+    int         dry_run    : 1;      /* just show actions, don't execute them */
+    int         gpg_verify : 1;      /* ignore unverifiable remotes */
 };
 
-/* a remote repository for applications */
-typedef struct {
-    char  *name;                         /* remote name */
-    char  *url;                          /* remote repository */
-    uid_t  session_uid;                  /* associated user for session */
-    int    urgent : 1;                   /* urgent updates pending */
-} remote_t;
+/* a remote repository (associated with a session/user and applications) */
+struct remote_s {
+    char  *name;                     /* flatpak remote name */
+    char  *url;                      /* remote repository URL */
+    char  *user;                     /* associated user to run session */
+    uid_t  uid;                      /* and its user id */
+};
 
-/* an installed application */
-typedef struct {
-    char *origin;                        /* originating remote */
-    char *name;                          /* application name */
-    char *head;                          /* current HEAD */
-    int   pending : 1;                   /* pending updates */
-    int   updated : 1;                   /* locally updated */
-    int   urgent  : 1;                   /* update is urgent */
-    int   start   : 1;                   /* start automatically */
-} application_t;
+/* a flatpak (application) */
+struct application_s {
+    char *origin;                    /* remote repository of origin */
+    char *name;                      /* flatpak application name */
+    char *head;                      /* current latest commit */
+    int   install : 1;               /* automatically install */
+    int   start   : 1;               /* automatically start within session */
+    int   urgent  : 1;               /* urgent update */
+    int   pending : 1;               /* pending remote updates */
+    int   updated : 1;               /* locally updated */
+};
 
 
 /*
- * function prototypes
+ * miscallaneous macros
+ */
+#define INVALID_UID      ((uid_t)-1)
+#define UNUSED_ARG(_arg) (void)(_arg)
+
+/*
+ * declarations, function prototypes
  */
 
-/* log.c */
-extern int log_fd;
-extern int log_mask;
-
-#define log(fmt, args...) do {                                \
-        dprintf(log_fd, fmt"\n", ## args);                    \
-    } while (0)
-
-
-#define log_debug(fmt, args...)   log("D: [%s:%d] "fmt, \
-                                      __FILE__, __LINE__, ##args)
-#define log_info(fmt, args...)    log("I: "fmt, ##args)
-#define log_warning(fmt, args...) log("W: "fmt, ##args)
-#define log_error(fmt, args...)   log("E: "fmt, ##args)
-
-void log_open(flatpak_t *f);
-
 /* config.c */
-void config_parse_cmdline(flatpak_t *f, int argc, char **argv);
+void config_parse_cmdline(context_t *c, int argc, char **argv);
 
 /* mainloop.c */
-int mainloop_needed(flatpak_t *f);
-void mainloop_create(flatpak_t *f);
-void mainloop_destroy(flatpak_t *f);
-void mainloop_run(flatpak_t *f);
-void mainloop_quit(flatpak_t *f, int exit_code);
-int mainloop_watch_signals(flatpak_t *f, sigset_t *ss,
-                           void (*h)(flatpak_t *, int));
-void mainloop_ditch_signals(flatpak_t *f);
-int mainloop_enable_monitor(flatpak_t *f, void (*cb)(flatpak_t *));
-void mainloop_disable_monitor(flatpak_t *f);
-unsigned int mainloop_add_timer(flatpak_t *f, int msec, int (*cb)(void *));
-void mainloop_del_timer(flatpak_t *f, unsigned int id);
-
-/* flatpak.c */
-#if 0
-int ftpk_init(flatpak_t *f, uid_t remote, void (*remote_cb)(flatpak_t *),
-              void (*local_cb)(flatpak_t *));
-#endif
-
-
-int ftpk_init(flatpak_t *f);
-void ftpk_exit(flatpak_t *f);
-
-
-
-int ftpk_discover_remotes(flatpak_t *f);
-int ftpk_discover_apps(flatpak_t *f);
-int ftpk_discover_updates(flatpak_t *f);
-remote_t *ftpk_lookup_remote(flatpak_t *f, const char *name);
-application_t *ftpk_lookup_app(flatpak_t *f, const char *name);
-void ftpk_clear_remotes(flatpak_t *f);
-void ftpk_clear_apps(flatpak_t *f);
-int ftpk_monitor_updates(flatpak_t *f, void (*cb)(flatpak_t *));
-int ftpk_launch_app(flatpak_t *f, application_t *app);
-int ftpk_update_app(flatpak_t *f, application_t *app);
-int ftpk_signal_app(application_t *app, uid_t uid, pid_t session, int sig);
-int ftpk_stop_app(application_t *app, uid_t uid, pid_t session);
-int ftpk_signal_session(uid_t uid, int sig);
-GKeyFile *ftpk_load_metadata(FlatpakInstalledRef *r);
-GKeyFile *ftpk_fetch_metadata(flatpak_t *f, const char *remote,
-                              FlatpakRef *ref);
-#define ftpk_ref_metadata(_m) g_key_file_ref(_m)
-#define ftpk_unref_metadata(_m) if (_m) g_key_file_unref(_m)
-#define ftpk_free_metadata(_m) ftpk_unref_metadata(_m)
-const char *ftpk_get_metadata(GKeyFile *f, const char *section, const char *key);
-pid_t ftpk_session_pid(uid_t uid);
-
-#define ftpk_foreach_remote(_f, _r)                                     \
-    GHashTableIter _r##_it;                                             \
-    g_hash_table_iter_init(&_r##_it, _f->remotes);                      \
-    while (g_hash_table_iter_next(&_r##_it, NULL, (void **)&_r))
-
-#define ftpk_foreach_app(_f, _a)                                        \
-    GHashTableIter _a##_it;                                             \
-    g_hash_table_iter_init(&_a##_it, _f->apps);                         \
-    while (g_hash_table_iter_next(&_a##_it, NULL, (void **)&_a))
-
+int mainloop_needed(context_t *c);
+void mainloop_create(context_t *c);
+void mainloop_destroy(context_t *c);
+void mainloop_run(context_t *c);
+void mainloop_quit(context_t *c, int exit_status);
+unsigned int mainloop_add_timer(context_t *c, int secs, int (*cb)(void *),
+                                void *user_data);
+void mainloop_del_timer(context_t *c, unsigned int id);
+unsigned int timer_add(context_t *c, int secs, int (*cb)(void *),
+                       void *user_data);
+void timer_del(context_t *c, unsigned int id);
 
 /* remote.c */
-int remote_discover(flatpak_t *f);
-uid_t remote_resolve_user(const char *name, char *buf, size_t size);
-remote_t *remote_lookup(flatpak_t *f, const char *name);
-const char *remote_username(remote_t *r, char *buf, size_t size);
-const char *remote_url(remote_t *r, char *buf, size_t size);
-remote_t *remote_for_user(flatpak_t *f, uid_t uid);
-
-/* application.c */
-int app_discover(flatpak_t *f);
-int app_discover_updates(flatpak_t *f);
-application_t *app_lookup(flatpak_t *f, const char *name);
-int app_fetch(flatpak_t *f);
-int app_update(flatpak_t *f);
-
-/* session.c */
-int session_enable(flatpak_t *f);
-int session_list(flatpak_t *f);
-int session_start(flatpak_t *f);
-int session_stop(flatpak_t *f);
-int session_signal(flatpak_t *f);
+uid_t remote_user_id(const char *remote, char *usrbuf, size_t size);
+char *remote_user_name(uid_t uid, char *usrbuf, size_t size);
 
 /* filesystem.c */
-int fsys_prepare_session(flatpak_t *f);
+int fsys_prepare_session(context_t *c);
 char *fsys_mkpath(char *path, size_t size, const char *fmt, ...);
 int fsys_mkdir(const char *path, mode_t mode);
-int fsys_mkdirp(mode_t, const char *fmt, ...);
+int fsys_mkdirp(mode_t mode, const char *fmt, ...);
 int fsys_symlink(const char *path, const char *dst);
-char *fsys_service_path(flatpak_t *f, const char *usr, char *path, size_t size);
-char *fsys_service_link(flatpak_t *f, const char *usr, char *path, size_t size);
+char *fsys_service_path(context_t *c, const char *usr, char *path, size_t size);
+char *fsys_service_link(context_t *c, const char *usr, char *path, size_t size);
 int fs_scan_proc(const char *exe, uid_t uid,
                  int (*cb)(pid_t pid, void *user_data), void *user_data);
+
+/* flatpak.c */
+typedef enum {
+    FPAK_DISCOVER_REMOTES = 0x1,
+    FPAK_DISCOVER_APPS    = 0x2,
+} fpak_flag_t;
+
+int fpak_init(context_t *c, int flags);
+int fpak_discover_remotes(context_t *c);
+int fpak_discover_apps(context_t *c);
+int fpak_start_app(context_t *c, application_t *a);
+int fpak_start_session(context_t *c);
+char *fpak_app_systemd_scope(uid_t uid, pid_t session, const char *app,
+                             char *scope, size_t size);
+int fpak_poll_updates(context_t *c);
+int fpak_update_apps(context_t *c);
+int fpak_reload_apps(context_t *c);
+int fpak_reload_session(context_t *c);
+remote_t *fpak_lookup_remote(context_t *c, const char *name);
+remote_t *fpak_remote_for_uid(context_t *c, uid_t uid);
+application_t *fpak_lookup_app(context_t *c, const char *name);
+int fpak_track_remote_updates(context_t *c, void (*cb)(context_t *));
+int fpak_track_local_updates(context_t *c, void (*cb)(context_t *));
+
+#define fpak_foreach_remote(_c, _r) \
+    for (_r = _c->remotes; _r && _r->name; _r++)
+
+#define fpak_foreach_app(_c, _a) \
+    for (_a = _c->apps; _a && _a->name; _a++)
+
+/* log.c */
+typedef enum {
+    FPAK_LOG_NONE    = 0x00,
+    FPAK_LOG_FATAL   = 0x01,
+    FPAK_LOG_ERROR   = 0x02,
+    FPAK_LOG_WARNING = 0x04,
+    FPAK_LOG_INFO    = 0x08,
+    FPAK_LOG_DEBUG   = 0x10,
+    FPAK_LOG_ALL     = 0x1f,
+} fpak_log_level_t;
+
+int  log_set_mask(int mask);
+int  log_get_mask(void);
+void log_open(context_t *c);
+void log_close(void);
+void log_msg(int lvl, const char *function, const char *file, int line,
+             const char *fmt, ...);
+
+#define __LOC__ __FUNCTION__, __FILE__, __LINE__
+
+#define log_fatal(_fmt, _args...) log_msg(FPAK_LOG_FATAL  , __LOC__,    \
+                                          _fmt, ## _args), exit(1)
+#define log_error(_fmt, _args...) log_msg(FPAK_LOG_ERROR  , __LOC__,    \
+                                          _fmt, ## _args)
+#define log_warn(_fmt, _args...)  log_msg(FPAK_LOG_WARNING, __LOC__,    \
+                                          _fmt, ## _args)
+#define log_info(_fmt, _args...)  log_msg(FPAK_LOG_INFO   , __LOC__,    \
+                                          _fmt, ## _args)
+#define log_debug(_fmt, _args...) log_msg(FPAK_LOG_DEBUG  , __LOC__,    \
+                                          _fmt, ## _args)
 
 #endif /* __FLATPAK_SESSION_H__ */

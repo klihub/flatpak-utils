@@ -27,20 +27,43 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <syslog.h>
 #include <fcntl.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
+
 #include "flatpak-session.h"
 
-int log_fd   = -1;
-int log_mask = 0xff;
+static int log_fd   = -1;
+static int log_mask = FPAK_LOG_FATAL | FPAK_LOG_ERROR;
 
 
-void log_open(flatpak_t *f)
+int log_set_mask(int mask)
 {
-    if (f->dry_run || (f->command != COMMAND_GENERATE))
-        log_fd = open("/proc/self/fd/1", O_WRONLY);
+    int old_mask = log_mask;
+
+    log_mask = mask;
+
+    return old_mask;
+}
+
+
+int log_get_mask(void)
+{
+    return log_mask;
+}
+
+
+void log_open(context_t *c)
+{
+    log_close();
+
+    if (c->dry_run || c->action != ACTION_GENERATE)
+        log_fd = 1;
     else
         log_fd = open("/dev/kmsg", O_WRONLY);
 
@@ -48,3 +71,44 @@ void log_open(flatpak_t *f)
         log_fd = 1;
 }
 
+
+void log_close(void)
+{
+    if (log_fd > 1)
+        close(log_fd);
+
+    log_fd = -1;
+}
+
+
+void log_msg(int lvl, const char *fn, const char *file, int line,
+             const char *format, ...)
+{
+    char    *hdrstr, hdrbuf[256];
+    int      hdrlen;
+    va_list  ap;
+
+    UNUSED_ARG(fn);
+    UNUSED_ARG(file);
+    UNUSED_ARG(line);
+
+    if (!(log_mask & lvl))
+        return;
+
+    switch (lvl) {
+    case FPAK_LOG_FATAL:   hdrstr = "F: "; hdrlen = 3; break;
+    case FPAK_LOG_ERROR:   hdrstr = "E: "; hdrlen = 3; break;
+    case FPAK_LOG_WARNING: hdrstr = "W: "; hdrlen = 3; break;
+    case FPAK_LOG_INFO:    hdrstr = "I: "; hdrlen = 3; break;
+    default:               hdrstr = "?: "; hdrlen = 3; break;
+    case FPAK_LOG_DEBUG:
+        hdrlen = snprintf(hdrstr = hdrbuf, sizeof(hdrbuf), "D: [%s] ", fn);
+        break;
+    }
+
+    write(log_fd, hdrstr, hdrlen);
+    va_start(ap, format);
+    vdprintf(log_fd, format, ap);
+    va_end(ap);
+    write(log_fd, "\n", 1);
+}

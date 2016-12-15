@@ -28,181 +28,76 @@
  */
 
 #include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-#include <errno.h>
-#include <signal.h>
-#include <sys/signalfd.h>
 
 #include "flatpak-session.h"
 
 
-int mainloop_needed(flatpak_t *f)
+int mainloop_needed(context_t *c)
 {
-    switch (f->command) {
-    case COMMAND_UPDATE:
-        return f->poll_interval > 0;
-    case COMMAND_START:
-    case COMMAND_STOP:
+    switch (c->action) {
+    case ACTION_UPDATE:
+        return c->poll_interval > 0;
+
+    case ACTION_START:
+    case ACTION_STOP:
         return TRUE;
+
     default:
         return FALSE;
     }
 }
 
 
-void mainloop_create(flatpak_t *f)
+void mainloop_create(context_t *c)
 {
-    if (f->loop != NULL)
+    if (c->ml != NULL)
         return;
 
-    f->loop = g_main_loop_new(NULL, FALSE);
+    c->ml = g_main_loop_new(NULL, FALSE);
 
-    if (f->loop != NULL)
-        return;
-
-    log_error("failed to create mainloop.");
-    exit(1);
+    if (c->ml == NULL)
+        log_fatal("failed to create mainloop");
 }
 
 
-void mainloop_run(flatpak_t *f)
+void mainloop_destroy(context_t *c)
 {
-    g_main_loop_run(f->loop);
+    g_main_loop_unref(c->ml);
+    c->ml = NULL;
 }
 
 
-void mainloop_quit(flatpak_t *f, int exit_code)
+void mainloop_run(context_t *c)
 {
-    if (!f->exit_code && exit_code)
-        f->exit_code = exit_code;
-
-    g_main_loop_quit(f->loop);
+    g_main_loop_run(c->ml);
 }
 
 
-void mainloop_destroy(flatpak_t *f)
+void mainloop_quit(context_t *c, int exit_status)
 {
-    mainloop_ditch_signals(f);
-    mainloop_disable_monitor(f);
-    g_main_loop_unref(f->loop);
-    f->loop = NULL;
+    g_main_loop_quit(c->ml);
+
+    if (!c->exit_code && exit_status)
+        c->exit_code = exit_status;
 }
 
 
-static gboolean sigevent(GIOChannel *gio, GIOCondition event, gpointer data)
+unsigned int timer_add(context_t *c, int secs, int (*cb)(void *),
+                       void *user_data)
 {
-    flatpak_t               *f = data;
-    struct signalfd_siginfo  si;
-    int                      sig;
+    UNUSED_ARG(c);
 
-    UNUSED_ARG(gio);
+    if (c->ml == NULL)
+        mainloop_create(c);
 
-    if (event & G_IO_IN) {
-        while (read(f->sfd, &si, sizeof(si)) > 0) {
-            sig = si.ssi_signo;
-            log_info("received signal %d (%s)", sig, strsignal(sig));
-
-            f->sighandler(f, sig);
-        }
-    }
-
-    return G_SOURCE_CONTINUE;
+    return g_timeout_add(1000 * secs, cb, user_data);
 }
 
 
-int mainloop_watch_signals(flatpak_t *f, sigset_t *ss,
-                           void (*h)(flatpak_t *, int))
+void timer_del(context_t *c, unsigned int id)
 {
-    sigprocmask(SIG_BLOCK, ss, NULL);
+    UNUSED_ARG(c);
 
-    if (h != NULL) {
-        if (f->sighandler == NULL)
-            f->sighandler = h;
-        else
-            goto alreadyset;
-    }
-
-    f->sfd = signalfd(f->sfd, ss, SFD_NONBLOCK | SFD_CLOEXEC);
-    f->sio = g_io_channel_unix_new(f->sfd);
-
-    if (f->sio == NULL)
-        goto fail;
-
-    f->sid = g_io_add_watch(f->sio, G_IO_IN, sigevent, f);
-
-    return 0;
-
- alreadyset:
-    errno = EBUSY;
- fail:
-    return -1;
-}
-
-
-void mainloop_ditch_signals(flatpak_t *f)
-{
-    g_source_remove(f->sid);
-    g_io_channel_unref(f->sio);
-    close(f->sfd);
-
-    f->sio        = NULL;
-    f->sid        = 0;
-    f->sfd        = -1;
-    f->sighandler = NULL;
-}
-
-
-static gboolean monitor_timer(gpointer data)
-{
-    flatpak_t *f = data;
-
-    f->monitor(f);
-
-    return G_SOURCE_CONTINUE;
-}
-
-
-int mainloop_enable_monitor(flatpak_t *f, void (*cb)(flatpak_t *))
-{
-    if (f->monitor != NULL)
-        goto alreadyset;
-
-    f->monitor = cb;
-    f->mid     = g_timeout_add(f->poll_interval * 1000, monitor_timer, f);
-
-    if (f->mid == 0)
-        goto fail;
-
-    return 0;
-
- alreadyset:
-    errno = EBUSY;
- fail:
-    return -1;
-}
-
-
-void mainloop_disable_monitor(flatpak_t *f)
-{
-    if (f->mid)
-        g_source_remove(f->mid);
-
-    f->mid     = 0;
-    f->monitor = NULL;
-}
-
-
-unsigned int mainloop_add_timer(flatpak_t *f, int msec, int (*cb)(void *))
-{
-    return g_timeout_add(msec, cb, f);
-}
-
-
-void mainloop_del_timer(flatpak_t *f, unsigned int id)
-{
-    UNUSED_ARG(f);
-
-    if (id > 0)
+    if (id)
         g_source_remove(id);
 }

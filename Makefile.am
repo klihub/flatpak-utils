@@ -1,4 +1,4 @@
-SUBDIRS  = . src
+SUBDIRS  = . src #orig
 doc_DATA = AUTHORS ChangeLog NEWS README
 
 # This is the only way with automake I know of to force 'check-git-hooks'

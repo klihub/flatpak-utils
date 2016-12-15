@@ -1,21 +1,18 @@
 SUBDIRS     = .
 AM_CFLAGS   = $(WARNING_CFLAGS) $(AM_CPPFLAGS) $(PATHDEFS)
-AM_CPPFLAGS = -I$(top_builddir) -I$(top_builddir)/src \
-              -I$(top_srcdir) -I$(top_srcdir)/src
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/src \
+              -I$(top_builddir) -I$(top_builddir)/src
 PATHDEFS    = -DSYSCONFDIR=\"${sysconfdir}\" \
               -DLIBDIR=\"${libdir}\" \
               -DLIBEXECDIR=\"${libexecdir}\"
 
-systemd_DATA = flatpak-session@.service \
-               flatpak-sessions.target \
-	       flatpak-update.service
-systemddir   = ${libdir}/systemd/system
-
 generator_PROGRAMS = flatpak-session-enable
 generatordir       = ${libdir}/systemd/system-generators
 
-session_SCRIPTS = start-session.sh
-sessiondir      = ${libexecdir}/flatpak-utils
+systemd_DATA       = flatpak-session@.service \
+                     flatpak-sessions.target \
+	             flatpak-update.service
+systemddir         = ${libdir}/systemd/system
 
 bin_PROGRAMS    =
 
@@ -26,15 +23,13 @@ bin_PROGRAMS    =
 bin_PROGRAMS += flatpak-session
 
 flatpak_session_SOURCES =		\
-		flatpak-session.c 	\
-		config.c 		\
+		flatpak-session.c	\
+		config.c		\
+		log.c			\
 		mainloop.c		\
 		remote.c		\
-		application.c		\
-		session.c		\
-		flatpak.c		\
 		filesystem.c		\
-		log.c
+		flatpak.c
 
 flatpak_session_CFLAGS =		\
 		$(AM_CFLAGS)		\

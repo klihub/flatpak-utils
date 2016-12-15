@@ -42,14 +42,14 @@
 #include "flatpak-session.h"
 
 
-int fsys_prepare_session(flatpak_t *f)
+int fsys_prepare_session(context_t *c)
 {
     char *dir = fsys_mkpath(NULL, 0, "%s/%s.wants",
-                            f->service_dir, FLATPAK_TARGET);
+                            c->service_dir, FPAK_SYSTEMD_TARGET);
 
     log_info("creating service directory %s...", dir);
 
-    if (f->dry_run)
+    if (c->dry_run)
         return 0;
     else
         return fsys_mkdirp(0755, dir);
@@ -203,25 +203,28 @@ int fsys_symlink(const char *path, const char *dst)
 }
 
 
-char *fsys_service_path(flatpak_t *f, const char *usr, char *path, size_t size)
+char *fsys_service_path(context_t *c, const char *usr, char *path, size_t size)
 {
-    UNUSED_ARG(f);
+    const char *srvdir  = SYSTEMD_SERVICEDIR;
+    const char *session = FPAK_SYSTEMD_SESSION;
+
+    UNUSED_ARG(c);
     UNUSED_ARG(usr);
 
-    return fsys_mkpath(path, size, "%s/%s", SYSTEMD_SERVICEDIR, FLATPAK_SESSION);
+    return fsys_mkpath(path, size, "%s/%s", srvdir, session);
 }
 
 
-char *fsys_service_link(flatpak_t *f, const char *usr, char *path, size_t size)
+char *fsys_service_link(context_t *c, const char *usr, char *path, size_t size)
 {
-    const char *session = FLATPAK_SESSION, *s;
+    const char *session = FPAK_SYSTEMD_SESSION, *s;
     char       *d;
     int         l, n;
 
     d = path;
     l = (int)size;
 
-    n = snprintf(d, l, "%s/%s.wants/", f->service_dir, FLATPAK_TARGET);
+    n = snprintf(d, l, "%s/%s.wants/", c->service_dir, FPAK_SYSTEMD_TARGET);
 
     if (n < 0)
         return NULL;
